@@ -1,0 +1,34 @@
+# ---- Build artifacts ----
+/bin/
+/build/
+/*.o
+*.o
+*.d
+*.out
+*.exe
+*.a
+*.so
+*.so.*
+
+# ---- Logs ----
+*.log
+
+# ---- VS Code ----
+.vscode/
+*.code-workspace
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ---- OS cruft ----
+.DS_Store
+Thumbs.db
+
+# ---- Docker ----
+/*.tar
+/.docker-buildx-cache
+
+# ---- Backups ----
+*~
+
+# ---- Environment files ----
+.env
