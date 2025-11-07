@@ -30,4 +30,12 @@ void mqtt_publish(const char *topic, const char *payload, int qos, int retained)
 void mqtt_loop(int timeout_ms);
 void mqtt_disconnect(void);
 
+/**
+ * @brief Publish a status update to the MQTT topic.
+ * 
+ * @param json The JSON string payload to publish
+ * @return int returns 0 on success, negative on error.
+ */
+int mqtt_publish_status(const char *json);
+
 #endif

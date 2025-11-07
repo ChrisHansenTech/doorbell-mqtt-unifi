@@ -1,17 +1,21 @@
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
 #include <time.h>
 #include "MQTTClient.h"
+#include "mqtt_inbound.h"
 #include "mqtt.h"
+#include "command.h"
 
 #define TIMEOUT 10000L
 
 static MQTTClient client;
-static MqttConfig g_cfg; // keep a copy for status topics
+static MqttConfig g_cfg; 
+static _Thread_local bool in_callback = false;
 
 // ---------- Helpers ----------
 static const char* env_or(const char *name, const char *fallback) {
@@ -71,17 +75,14 @@ static void conn_lost(void *context, char *cause) {
 }
 
 static int msg_arrived(void *context, char *topicName, int topicLen, MQTTClient_message *message) {
-    printf("[MQTT] %s: %.*s\n", topicName, message->payloadlen, (char*)message->payload);
-
     (void)context;
-    (void)topicLen;
-    // TODO: parse JSON and trigger your logic (cJSON, etc.)
 
-    char payload[256];
-    snprintf(payload, sizeof(payload), "{ \"status\": \"echo\", \"topic\": \"%s\", \"message\": \"%.*s\" }",
-        topicName, message->payloadlen, (char*)message->payload);
+    int got_len = (topicLen > 0) ? topicLen : (int)strlen(topicName);
+    printf("[MQTT] %.*s: %.*s\n",
+           got_len, topicName,
+           message->payloadlen, (char*)message->payload);
 
-    mqtt_publish("doorbell/status", payload, 1, 0);
+    mqtt_inbound_enqueue(topicName, topicLen, message->payload, (size_t)message->payloadlen);
 
     MQTTClient_freeMessage(&message);
     MQTTClient_free(topicName);
@@ -150,6 +151,8 @@ int mqtt_init(const MqttConfig *cfg_in) {
     // Publish "online" retained
     mqtt_publish(g_cfg.topic_status, "{\"status\":\"online\"}", g_cfg.qos, g_cfg.retained_online);
 
+    mqtt_inbound_start();
+
     return 0;
 }
 
@@ -160,6 +163,9 @@ void mqtt_subscribe(const char *topic) {
     } else {
         printf("[INFO] Subscribed: %s (qos=%d)\n", topic, g_cfg.qos);
     }
+
+    mqtt_routes_add(topic, handle_set);
+
 }
 
 void mqtt_publish(const char *topic, const char *payload, int qos, int retained) {
@@ -171,13 +177,20 @@ void mqtt_publish(const char *topic, const char *payload, int qos, int retained)
     pubmsg.qos        = qos;
     pubmsg.retained   = retained;
 
+    printf("[MQTT] Publishing %s (in_callback=%d)\n", payload, in_callback);
+
+
     int rc = MQTTClient_publishMessage(client, topic, &pubmsg, &token);
     if (rc != MQTTCLIENT_SUCCESS) {
         fprintf(stderr, "[ERROR] Publish rc=%d topic=%s\n", rc, topic);
         return;
     }
-    MQTTClient_waitForCompletion(client, token, TIMEOUT);
-    // printf("[INFO] Published -> %s\n", topic);
+
+    if (!in_callback && rc == MQTTCLIENT_SUCCESS) {
+        MQTTClient_waitForCompletion(client, token, TIMEOUT);
+    }
+    
+    printf("[INFO] Published -> %s\n", topic);
 }
 
 void mqtt_loop(int timeout_ms) {
@@ -195,4 +208,9 @@ void mqtt_disconnect(void) {
     mqtt_publish(g_cfg.topic_status, "{\"status\":\"offline\"}", g_cfg.qos, g_cfg.retained_online);
     MQTTClient_disconnect(client, (int)TIMEOUT);
     MQTTClient_destroy(&client);
+}
+
+int mqtt_publish_status(const char *json) {
+    mqtt_publish(g_cfg.topic_status, json, g_cfg.qos, 0);
+    return 0;
 }
