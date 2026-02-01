@@ -1,7 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <signal.h>
+
+#include "banner.h"
+#include "config.h"
+#include "config_types.h"
+#include "ha_mqtt.h"
+#include "logger.h"
 #include "mqtt.h"
+#include "mqtt_router.h"
+#include "ha_topics.h"
+#include "mqtt_router_types.h"
+#include "unifi_profiles_repo.h"
+#include "utils.h"
+
+#include <stdbool.h>
+#include <signal.h>
 
 static volatile int running = 1;
 static void handle_signal(int sig) {
@@ -13,26 +24,80 @@ int main(void) {
     signal(SIGINT,  handle_signal);
     signal(SIGTERM, handle_signal);
 
-    printf("[INFO] Starting UniFi Doorbell MQTT…\n");
+    log_init(NULL);
 
-    MqttConfig cfg;
-    if (mqtt_load_from_env(&cfg) != 0) {
-        fprintf(stderr, "[ERROR] Failed to load MQTT env\n");
-        return 1;
+    print_banner();
+
+    if (!utils_delete_directory("./tmp")) {
+        LOG_ERROR("Error cleaning '.tmp'");
     }
 
-    if (mqtt_init(&cfg) != 0) {
-        fprintf(stderr, "[ERROR] MQTT init failed\n");
-        return 1;
+    config_t cfg = {0};
+    bool mqtt_initialized = false;
+    bool mqtt_router_started = false;
+    int rc = 0;
+
+    if (!config_load("config.json", &cfg)) {
+        LOG_FATAL("Configuration load failed. Exiting.");
+        rc = 1;
+        goto cleanup;
     }
 
-    mqtt_subscribe(cfg.topic_set);
+    if(!profiles_repo_init("./profiles", &cfg.holiday_cfg)) {
+        LOG_FATAL("Profiles initialization failed. Exiting.");
+        rc = 1;
+        goto cleanup;
+    }
+
+    ha_topics_init(&cfg);
+
+    if (!ha_mqtt_bind(&cfg)) {
+        LOG_FATAL("Home Assistant MQTT bind failed. Exiting.");
+        rc = 1;
+        goto cleanup;
+    }
+
+    if (!mqtt_init(&cfg.mqtt_cfg)) {
+        LOG_FATAL("MQTT initialization failed. Exiting.");
+        rc = 1;
+        goto cleanup;
+    }
+
+    mqtt_initialized = true;
+
+    mqtt_router_ctx_t inbound_ctx;
+    inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
+    inbound_ctx.holiday_cfg = &cfg.holiday_cfg;
+
+    if (!mqtt_router_start(&inbound_ctx)) {
+        LOG_FATAL("MQTT inbound worker failed to start. Exiting.");
+        rc = 1;
+        goto cleanup;
+    }
+
+    mqtt_router_started = true;
+
+    ha_topic_subscribe_commands();
 
     while (running) {
-        mqtt_loop(100); // 100ms sleep; callbacks handle messages
+        mqtt_loop(100);
     }
 
-    mqtt_disconnect();
-    printf("[INFO] Stopped cleanly.\n");
-    return 0;
+    LOG_INFO("Shutdown requested, stopping service...");
+
+cleanup:
+    if (mqtt_router_started) {
+        mqtt_router_stop();
+    }
+
+    if (mqtt_initialized) {
+        mqtt_disconnect();
+    }
+
+    profiles_repo_shutdown();
+    config_free(&cfg);
+    
+    LOG_INFO("Service stopped cleanly.");
+    
+    return rc;
 }

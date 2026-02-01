@@ -15,13 +15,39 @@ ifeq ($(strip $(CJSON_SRC)),)
   $(error Could not find cJSON.c (expected at src/third_party/cJSON/cJSON.c))
 endif
 
+MD5_SRC := $(firstword \
+  $(wildcard $(SRCDIR)/third_party/crypto/md5.c) \
+)
+ifeq ($(strip $(MD5_SRC)),)
+  $(error Could not find md5.c (expected at src/third_party/crypto/md5.c))
+endif
+
 SRCS := \
   $(wildcard $(SRCDIR)/*.c) \
-  $(CJSON_SRC)
+  $(CJSON_SRC) \
+  $(MD5_SRC)
 
 # Map sources to objects in build tree (preserve subdirs)
 OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
+
+# ===== Test objects (exclude main.c so we don't get two mains) =====
+MAIN_SRC  := $(SRCDIR)/main.c
+CORE_SRCS := $(filter-out $(MAIN_SRC),$(SRCS))
+CORE_OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(CORE_SRCS))
+
+# Unity test framework
+UNITY_DIR   := tests/third_party/unity
+
+# Expand all test_*.c at make time
+TEST_SRCS   := $(wildcard tests/test_*.c) \
+               $(UNITY_DIR)/unity.c
+
+TEST_OBJS   := $(patsubst %.c,$(OBJDIR)/%.o,$(TEST_SRCS))
+TEST_BIN    := $(BINDIR)/$(TARGET)_tests
+
+# Test objects need Unity's include path
+$(TEST_OBJS): CFLAGS += -I$(UNITY_DIR)
 
 # ===== Toolchain / Flags =====
 CC    := gcc
@@ -43,7 +69,7 @@ ifeq ($(strip $(SSH2_LIBS)),)
 endif
 
 # Include paths (add cJSON header path)
-INCLUDES := -I$(INCDIR) -I$(INCDIR)/third_party/cJSON
+INCLUDES := -I$(INCDIR) -I$(INCDIR)/third_party/cJSON -I$(INCDIR)/third_party/crypto
 
 # Common compiler/linker flags
 CSTD   := -std=c11
@@ -51,8 +77,8 @@ WARN   := -Wall -Wextra -Werror -Wpedantic
 GENDEP := -MMD -MP
 
 # Build type toggles
-OPT_RELEASE := -O2 -DNDEBUG
-OPT_DEBUG   := -O0 -g3 -DDEBUG
+OPT_RELEASE := -O2 -DNDEBUG -D_POSIX_C_SOURCE=200809L
+OPT_DEBUG   := -O0 -g3 -DDEBUG -D_POSIX_C_SOURCE=200809L
 
 # Default (release) unless BUILD=debug or target 'debug' is used
 CFLAGS  ?= $(CSTD) $(WARN) $(GENDEP) $(INCLUDES) $(PAHO_CFLAGS) $(SSH2_CFLAGS)
@@ -60,7 +86,7 @@ LDFLAGS ?=
 LDLIBS  ?= $(PAHO_LIBS) $(SSH2_LIBS) -lpthread
 
 # ===== Phony targets =====
-.PHONY: all release debug run clean distclean print dirs
+.PHONY: all release debug run clean distclean print dirs test test-bin
 
 all: release
 
@@ -91,6 +117,17 @@ dirs:
 # Convenience
 run: $(BINDIR)/$(TARGET)
 	$(BINDIR)/$(TARGET)
+
+
+# ===== Tests =====
+test: dirs $(TEST_BIN)
+	$(TEST_BIN)
+
+$(TEST_BIN): $(CORE_OBJS) $(TEST_OBJS)
+	$(CC) $(LDFLAGS) $(CORE_OBJS) $(TEST_OBJS) -o $@ $(LDLIBS)
+
+test-bin: dirs $(TEST_BIN)
+	@true
 
 clean:
 	@$(RM) -r $(OBJDIR)

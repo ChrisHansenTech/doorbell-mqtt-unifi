@@ -1,0 +1,8 @@
+{
+  "holidays": {
+    "Christmas": "christmas",
+    "New Years": "new_years",
+    "St Patriks Day": "st_patricks_day",
+    "Easter": "easter"
+  }
+}

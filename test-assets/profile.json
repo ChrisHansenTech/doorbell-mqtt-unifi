@@ -1,0 +1,18 @@
+{
+    "schemaVersion": 1,
+    "welcome": {
+        "enabled": true,
+        "file": "test.png",
+        "count": 32,
+        "durationMs": 960,
+        "loop": true,
+        "guiId": "WELCOME"
+    },
+    "ringButton": {
+        "enabled": true,
+        "file": "test.ogg",
+        "repeatTimes": 1,
+        "volume": 100,
+        "soundStateName":	"RING_BUTTON_PRESSED"
+    }
+}

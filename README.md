@@ -1,133 +1,170 @@
 # Doorbell MQTT UniFi
 
-A small C prototype that connects a UniFi G4 Doorbell project to MQTT. It is
-currently focused on reliable MQTT connectivity and message echoing while the
-doorbell SFTP workflow is sketched out for future work.
+A C-based service that bridges **UniFi Protect doorbell profiles** with **MQTT**
+and **Home Assistant**. It publishes Home Assistant discovery entities, applies
+holiday or custom profiles over SSH, and can download the active profile assets
+from the doorbell.
+
+This project enables deeper, local-only customization of UniFi doorbell
+animations and sounds beyond what the official Home Assistant integration
+currently supports.
+
+---
+
+## ⚠️ Audience & Safety Notes
+
+This project is intended for **advanced users** who:
+
+- Are comfortable with MQTT and Home Assistant
+- Understand SSH access and device-level file modification
+- Accept the risks of modifying files on embedded devices
+
+This is **not an official UniFi tool**.
+
+The doorbell generally self-heals by re-syncing configuration from UniFi Protect
+after a reboot, but misuse may temporarily remove custom sounds or animations.
+Use at your own risk.
+
+---
+
+## Project Status
+
+**Current state:** Alpha (happy-path functional)
+
+### Known working
+- Holiday and custom profile application
+- Home Assistant MQTT discovery (controls + sensors)
+- Test asset upload via Home Assistant
+- Profile download from the doorbell
+- Graceful shutdown on SIGINT / SIGTERM
+
+### Not yet finalized
+- Docker image and container runtime
+- Rollback behavior on partial failures
+- Long-running retry/backoff logic
+- Formal release versioning
+
+---
+
+## Home Assistant UI
+
+The service publishes MQTT discovery payloads so Home Assistant automatically
+creates entities for control and status.
+
+![Home Assistant entities](docs/images/ha-entities.png)
+
+---
 
 ## Current Capabilities
 
-- Loads broker connection details from environment variables
-- Connects to MQTT via the Eclipse Paho C client and publishes an `online`
-  retained status
-- Subscribes to `doorbell/set` (or a custom topic) and prints every payload
-- Echoes each inbound payload to a status topic so you can verify end-to-end
-  messaging
-- Shuts down cleanly on `SIGINT` or `SIGTERM` and publishes `offline`
+- Loads configuration from `config.json` with environment-variable overrides
+- Connects to MQTT via Eclipse Paho
+- Publishes availability, status, and error topics
+- Publishes Home Assistant discovery entities
+- Applies holiday or custom profiles over SSH
+- Downloads the doorbell’s active profile assets
+- Writes logs to stdout/stderr (Docker-friendly)
+
+---
 
 ## Repository Layout
 
 ```
-├── src/                 # C sources (main loop and MQTT integration)
-│   ├── main.c
-│   └── mqtt.c
-├── include/             # Public headers shared across the program
-│   └── mqtt.h
-├── assests/             # Placeholder for doorbell audio/animation content
+├── src/                 # C sources
+├── include/             # Public headers
+├── profiles/            # Holiday/custom profiles + downloads
+├── test-assets/         # Sample assets used by the test command (not user-facing)
+├── tests/               # Unity-based unit tests + fixtures
 ├── bin/                 # Built binary (created by make)
 ├── build/               # Object files and dependency data (created by make)
-├── config.json          # Reserved for future JSON-driven configuration
+├── config.json          # Runtime configuration (required)
+├── config.example.json  # Example configuration template
 ├── Makefile             # GCC build with pkg-config integration
 └── Dockerfile           # Placeholder for a future container image
 ```
 
-> Note: `assests/` is intentionally checked in as a placeholder. The directory
-> will eventually hold audio and animation bundles for the doorbell.
+---
 
 ## Prerequisites
 
 - GCC or Clang
 - pkg-config
-- `libpaho-mqtt3c` (Paho C client headers and library)
-- Optional: `cJSON` and `libssh2` headers/libs — they are not used yet but the
-  Makefile is ready for future modules
+- Eclipse Paho MQTT C client (`libpaho-mqtt3c`)
+- libssh2
+- OpenSSL headers
 
-On Debian/Ubuntu you can start with:
+On Debian/Ubuntu:
 
 ```bash
-sudo apt install build-essential pkg-config libpaho-mqtt-dev libssl-dev
+sudo apt install build-essential pkg-config libpaho-mqtt-dev libssh2-1-dev libssl-dev
 ```
+
+---
 
 ## Build and Run
 
 ```bash
-make          # release-style build in bin/doorbell-mqtt-unifi
-make debug    # debug build with -O0 -g3
+make          # release-style build
+make debug    # debug build (-O0 -g3)
 make run      # convenience target; requires a prior build
 ```
 
-You can also run the binary manually:
+Or run manually:
 
 ```bash
 ./bin/doorbell-mqtt-unifi
 ```
 
-When the process starts it connects to the configured broker, subscribes to
-the set topic, and publishes an online heartbeat message.
+---
 
 ## Configuration
 
-All runtime settings are provided via environment variables. Defaults match a
-local, non-TLS broker.
+Runtime configuration is loaded from `config.json`. Environment variables take
+precedence when set.
 
-| Variable             | Default                | Purpose |
-| -------------------- | ---------------------- | ------- |
-| `MQTT_HOST`          | `localhost`            | Broker host/IP |
-| `MQTT_PORT`          | `1883`                 | Broker port |
-| `MQTT_SSL`           | `0`                    | Set to `1`/`true` to enable TLS |
-| `MQTT_CLIENT_ID`     | `doorbell-client-<pid>`| Override the autogenerated client id |
-| `MQTT_USERNAME`      | *(empty)*              | Optional username |
-| `MQTT_PASSWORD`      | *(empty)*              | Optional password |
-| `MQTT_QOS`           | `1`                    | QoS for subscribe/publish |
-| `MQTT_KEEPALIVE`     | `30`                   | Keepalive interval in seconds |
-| `MQTT_CLEAN_SESSION` | `1`                    | Set to `0` to keep subscriptions |
-| `MQTT_RETAINED_ONLINE` | `1`                 | Retain online/offline status messages |
-| `MQTT_CAFILE`        | *(empty)*              | Path to CA bundle (required when TLS is on) |
-| `MQTT_CERTFILE`      | *(empty)*              | Client certificate (optional) |
-| `MQTT_KEYFILE`       | *(empty)*              | Client key (optional) |
-| `MQTT_KEYPASS`       | *(empty)*              | Password for the client key |
-| `MQTT_TOPIC_SET`     | `doorbell/set`         | Topic that the service subscribes to |
-| `MQTT_TOPIC_STATUS`  | `doorbell/status`      | Topic used for status updates |
+Start from `config.example.json`.
 
-Example shell session:
+### Minimal example
 
-```bash
-export MQTT_HOST=192.168.1.10
-export MQTT_TOPIC_SET=homeassistant/doorbell/set
-export MQTT_TOPIC_STATUS=homeassistant/doorbell/status
-make run
+```json
+{
+  "mqtt": {
+    "host": "localhost",
+    "port": 1883,
+    "prefix": "chrishansentech",
+    "instance": "default"
+  },
+  "ssh": {
+    "host": "192.168.1.135",
+    "port": 22,
+    "user": "ubnt",
+    "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
+  },
+  "holidays": {
+    "Christmas": "christmas",
+    "New Years": "new_years",
+    "Easter": "easter"
+  }
+}
 ```
 
-If TLS is enabled (`MQTT_SSL=1`), set `MQTT_CAFILE` (and optionally
-`MQTT_CERTFILE`, `MQTT_KEYFILE`, `MQTT_KEYPASS`) to point at the appropriate
-certificate material.
+---
 
-## MQTT Flow
+## Profiles
 
-1. On start, the service publishes `{"status":"online"}` and subscribes to the
-   configured set topic.
-2. Every received MQTT payload is printed to stdout.
-3. The payload is echoed back to the status topic inside
-   `{"status":"echo","topic":"...","message":"..."}` so you can validate the
-   round trip.
-4. When the process exits it publishes `{"status":"offline"}`.
+Profiles live under:
 
-This echo loop is the foundation for the next milestones: parsing JSON,
-matching incoming payloads to audio/animation bundles, and uploading them to
-the doorbell via SFTP.
+```
+profiles/<name>/
+```
 
-## Next Steps
+Each profile must include:
+- `profile.json`
+- One image file (`.png`)
+- One sound file (`.ogg`)
 
-- Parse inbound JSON (cJSON) and branch on holiday/custom payload types
-- Map payloads to files stored under `assests/`
-- Upload files over SFTP (libssh2) to the UniFi Protect controller
-- Flesh out the Dockerfile so the service can run containerized alongside
-  MQTT/Home Assistant
-
-## Contributing
-
-Pull requests and issue reports are welcome. Please describe the change,
-mention the environment you tested in, and keep commits focused.
+---
 
 ## License
 
-MIT License – see `LICENSE`.
+MIT License — see `LICENSE`.

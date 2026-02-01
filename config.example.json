@@ -1,0 +1,28 @@
+{
+  "mqtt": {
+    "host": "192.168.1.x",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "qos": 1,
+    "keepalive": 30,
+    "clean_session": 1,
+    "retained_online": 1,
+    "tls_enabled": 0,
+    "cafile": "",
+    "certfile": "",
+    "keyfile": "",
+    "keypass": ""
+  },
+  "ssh": {
+    "host": "192.168.1.x",
+    "port": 22,
+    "username": "ubnt",
+    "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
+  },
+  "holidays": {
+    "Christmas": "christmas",
+    "New Years": "new_years",
+    "Easter": "easter"
+  }
+}

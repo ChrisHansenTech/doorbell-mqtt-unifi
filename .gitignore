@@ -1,6 +1,8 @@
 # ---- Build artifacts ----
 /bin/
 /build/
+/temp/
+/tmp/
 /*.o
 *.o
 *.d
@@ -26,9 +28,12 @@ Thumbs.db
 # ---- Docker ----
 /*.tar
 /.docker-buildx-cache
+/.cache/clangd
 
 # ---- Backups ----
 *~
 
 # ---- Environment files ----
 .env
+config.json
+compile_commands.json

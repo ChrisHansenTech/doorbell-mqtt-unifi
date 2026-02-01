@@ -1,9 +1,13 @@
-#include "mqtt_inbound.h"
+#include "mqtt_router.h"
+#include "mqtt_router_types.h"
+#include "logger.h"
+
+
 #include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define IN_Q_CAP 64
 #define MAX_ROUTES 16
@@ -51,7 +55,7 @@ static bool inq_push_locked(const char *topic, int topicLen, const void *payload
     return true;
 }
 
-int mqtt_inbound_enqueue(const char *topic, int topicLen, const char *payload, size_t payloadLen) {
+int mqtt_router_enqueue(const char *topic, int topicLen, const char *payload, size_t payloadLen) {
     int ok = 0;
 
     pthread_mutex_lock(&inq.mtx);
@@ -61,8 +65,7 @@ int mqtt_inbound_enqueue(const char *topic, int topicLen, const char *payload, s
     pthread_mutex_unlock(&inq.mtx);
 
     if (ok != 0) {
-        fprintf(stderr,"[WARN] Inbound queue is full, dropping message on '%.*s'\n",
-                (topicLen > 0) ? topicLen : (int)strlen(topic), topic);
+        LOG_WARN("Inbound queue is full, dropping message on '%.*s'", (topicLen > 0) ? topicLen : (int)strlen(topic), topic);
     }
 
     return ok;
@@ -92,7 +95,7 @@ static void inq_free(struct InMsg *m) {
 }
 
 struct Route {
-    const char *topic;
+    char topic[256];
     mqtt_handler_fn fn;
 };
 
@@ -102,52 +105,61 @@ static size_t route_count = 0;
 int mqtt_routes_add(const char *topic, mqtt_handler_fn fn) {
     if (route_count >= MAX_ROUTES) return -1;
 
-    routes[route_count++] = (struct Route){ topic, fn };
+    struct Route *r = &routes[route_count++];
+
+    strncpy(r->topic, topic, sizeof(r->topic) - 1);
+    r->topic[sizeof(r->topic) - 1] = '\0';
+    r->fn = fn;
     return 0;
 }
 
-static void mqtt_routes_dispatch(const char *topic, const char *payload, size_t len) {
+static void mqtt_routes_dispatch(const mqtt_router_ctx_t *ctx, const char *topic, const char *payload, size_t len) {
     for (size_t i = 0; i < route_count; i++) {
-        if (routes[i].topic && strcmp(topic, routes[i].topic) == 0) {
-            routes->fn(payload, len);
+        if (strcmp(topic, routes[i].topic) == 0) {
+            routes[i].fn(ctx, payload, len);
             return;
         }
     }
 
-    fprintf(stderr, "[WARN] Unknown topic: '%.s'\n", topic);
+    LOG_WARN("Unknown topic: '%.s'", topic);
 }
 
 static void *in_worker(void *arg) {
-    (void)arg;
+    mqtt_router_ctx_t *ctx = (mqtt_router_ctx_t *)arg;
+
+    if (!ctx) {
+        LOG_ERROR("in_worker: started without context");
+        return NULL;
+    } 
 
     struct InMsg m;
 
     while (inq_pop(&m)) {
-        printf("[MQTT:Q] %s: %.*s\n", m.topic, (int)m.payload_len, m.payload);
+        LOG_DEBUG("%s: %.*s", m.topic, (int)m.payload_len, m.payload);
 
-        mqtt_routes_dispatch(m.topic, m.payload, m.payload_len);
+        mqtt_routes_dispatch(ctx, m.topic, m.payload, m.payload_len);
         inq_free(&m);
     }
 
     return NULL;
 }
 
-int mqtt_inbound_start(void) {
-    if (inq.running) return 0;
+bool mqtt_router_start(const mqtt_router_ctx_t *ctx) {
+    if (inq.running) return false;
 
     inq.running = 1;
 
-    int rc = pthread_create(&inq.th, NULL, in_worker, NULL);
+    int rc = pthread_create(&inq.th, NULL, in_worker, (void*)ctx);
 
     if (rc != 0) {
         inq.running = 0;
-        return -1;
+        return false;
     }
 
-    return 0;
+    return true;
 }
 
-void mqtt_inbound_stop(void) {
+void mqtt_router_stop(void) {
     if (!inq.running) return;
     
     pthread_mutex_lock(&inq.mtx);

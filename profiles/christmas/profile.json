@@ -1,0 +1,18 @@
+{
+    "schemaVersion": 1,
+    "welcome": {
+        "enabled": true,
+        "file": "christmas.png",
+        "count": 57,
+        "durationMs": 100,
+        "loop": true,
+        "guiId": "WELCOME"
+    },
+    "ringButton": {
+        "enabled": true,
+        "file": "christmas.ogg",
+        "repeatTimes": 1,
+        "volume": 100,
+        "soundStateName":	"RING_BUTTON_PRESSED"
+    }
+}

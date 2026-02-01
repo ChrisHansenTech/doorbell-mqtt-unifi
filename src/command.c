@@ -1,120 +1,252 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include "cJSON.h"
 #include "command.h"
-#include "mqtt.h"
+#include "errors.h"
+#include "ha_status.h"
+#include "ha_topics.h"
+#include "mqtt_router_types.h"
+#include "ssh.h"
+#include "unifi_profile.h"
+#include "unifi_profile_json.h"
+#include "unifi_profiles_repo.h"
+#include "unifi_remote.h"
+#include "utils.h"
+#include <linux/limits.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-static int get_json_string(cJSON *obj, const char *key, const char **out) {
-    cJSON *n = cJSON_GetObjectItemCaseSensitive(obj, key);
-
-    if (!cJSON_IsString(n) || !n->valuestring) {
-        return 0;
+void command_set_holiday(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    if (ctx == NULL || payload == NULL || payloadLen == 0) {
+        return;
     }
 
-    *out = n->valuestring;
+    status_set_state("Uploading");
 
-    return 1;
+    bool ok = false;
+    ssh_session_t *session = NULL;
+    char profile_path[PATH_MAX];
+    unifi_profile_t profile;
+
+    if (!profiles_repo_resolve_holiday(payload, profile_path, sizeof(profile_path))) {
+        HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Profile directory for holiday '%s' not found", payload);
+        goto cleanup;
+    }
+
+    if (!unifi_profile_load_from_file(profile_path, &profile)) {
+        HA_ERRF(ERROR_PROFILE_INVALID, "Error loading profile.json for holiday '%s'", payload);
+        goto cleanup;
+    }
+
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        goto cleanup;
+    }
+
+    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+        goto cleanup;
+    }
+
+    ok = true;
+
+cleanup: 
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    if (!ok) {
+        status_set_state("Idle");
+        return;
+    }
+
+    status_set_active_profile(payload);
+    status_set_state("Idle");
 }
 
-void command_handle_set(const char *json, size_t len) {
-    cJSON *root = cJSON_ParseWithLength(json, len);
-
-    if (!root) {
-        mqtt_publish_status("{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
+                          size_t payloadLen) {
+    if (ctx == NULL || payload == NULL || payloadLen == 0) {
         return;
     }
 
-    const char *type = NULL;
+    status_set_state("Uploading");
 
-    if(!get_json_string(root, "type", &type)) {
-        mqtt_publish_status("{\"status\":\"error\",\"message\":\"Missing type\"}");
-        cJSON_Delete(root);
+    bool ok = true;
+    ssh_session_t *session = NULL;
+    char profile_path[PATH_MAX];
+    unifi_profile_t profile;
+
+    if (!utils_build_path(profile_path, sizeof(profile_path), "./profiles", payload)) {
+        goto cleanup;
+    }
+
+    if (!utils_directory_exists(profile_path)) {
+        HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Custom profile '%s' not found", payload);
+        goto cleanup; 
+    }
+    
+    if (!unifi_profile_load_from_file(profile_path, &profile)) {
+        HA_ERRF(ERROR_PROFILE_INVALID, "Error loading profile.json for '%s'", payload);
+        goto cleanup;
+    }
+
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        goto cleanup;
+    }
+
+    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+        goto cleanup;
+    }
+
+    ok = true;
+
+cleanup: 
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    if (!ok) {
+        status_set_state("Idle");
         return;
     }
 
-    char target[160] ={0};
-    const char *image_path = NULL; //TODO: Populate later from assets.c
-    const char *sound_path = NULL; //TDOD: Populate later from assests.c
-    (void)image_path;
-    (void)sound_path;
+    status_set_active_profile(payload);
+    status_set_state("Idle");
+}
 
-    if(type && strcmp(type, "holiday") == 0) {
-      const char *name;
-      if(!get_json_string(root, "name", &name)) {
-        mqtt_publish_status("{\"status\":\"error\",\"message\":\"Missing name\"}");
-        cJSON_Delete(root);
-        return;
+void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
+                             size_t payloadLen) {
+  if (ctx == NULL || payload == NULL || payloadLen == 0) {
+    return;
+  }
+
+  (void)payload;
+  (void)payloadLen;
+
+  bool partial_download = true;
+  char local_path[PATH_MAX];
+  char tmp_path[PATH_MAX];
+  char final_path[PATH_MAX];
+  unifi_profile_t profile;
+
+  status_set_state("Downloading");
+
+  if (!utils_create_directory("profiles/.tmp")) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp directory.");
+  }
+
+  char ts[32];
+  utils_build_timestamp(ts, sizeof(ts));
+
+  if (!utils_build_path(tmp_path, sizeof(tmp_path), "profiles/.tmp", ts)) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path.");
+    return;
+  }
+
+  if (!utils_create_directory(tmp_path)) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp directory.");
+    return;
+  }
+
+  ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
+  if (!session) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session.");
+    return;
+  }
+
+  if (!unifi_profile_download_and_load(session, tmp_path, &profile)) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to download profile assets");
+    goto cleanup;
+  }
+
+  if (!utils_build_path(local_path, sizeof(local_path), tmp_path,
+                        "profile.json")) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
+           "Failed to create path for profile.json");
+    goto cleanup;
+  }
+
+  if (!unifi_profile_write_to_file(local_path, &profile)) {
+    HA_ERRF(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to write %s", local_path);
+    goto cleanup;
+  }
+
+  partial_download = false;
+
+  if (!utils_build_path(final_path, sizeof(final_path), "profiles/downloads/",
+                        ts)) {
+    goto cleanup;
+  }
+
+  if (rename(tmp_path, final_path) != 0) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
+           "Failed to rename download temp path.");
+    goto cleanup;
+  }
+
+cleanup:
+  if (session) {
+    ssh_session_destroy(session);
+  }
+
+  if (partial_download) {
+    if (utils_build_path(final_path, sizeof(final_path), "profiles/partial/",
+                         ts)) {
+      if (rename(tmp_path, final_path) != 0) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
+               "Failed to rename download temp path.");
       }
-
-      snprintf(target, sizeof(target), "%s", name ? name : "(NULL)");
-
-      // TODO: resolve with assets.c for now simulate with success.
-      image_path = "/assests/christmas/doorbell.png";
-      sound_path = "/assests/christmas/doorbell.wav";
     }
-    else if (type && strcmp(type, "custom") == 0) {
-        const char *folder;
-        if(!get_json_string(root, "folder", &folder)) {
-            mqtt_publish_status("{\"status\":\"error\",\"message\":\"Missing folder\"}");
-            cJSON_Delete(root);
-            return;
-        }
+  }
 
-        snprintf(target, sizeof(target), "%s", folder ? folder : "(NULL)");
+  status_set_status_message("download/last_path", final_path);
+  status_set_state("Idle");
+}
 
-        // TODO: resolve with assets.c
-        image_path = "/assets/custom/test/doorbell.png";
-        sound_path = "/assets/custom/test/doorbell.wav";
-    }
-    else {
-        mqtt_publish_status("{\"status\":\"error\",\"message\":\"Invalid type\"}");
-        cJSON_Delete(root);
+void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    if (ctx == NULL || payload == NULL || payloadLen == 0) {
         return;
     }
 
-    // Send uploading status
-    {
-        cJSON *status = cJSON_CreateObject();
-        cJSON_AddStringToObject(status, "status", "uploading");
-        cJSON_AddStringToObject(status, "message", target);
+    (void)payload;
+    (void)payloadLen;
 
-        char *txt = cJSON_PrintUnformatted(status);
+    bool ok = false;
+    ssh_session_t *session = NULL;
+    char profile_path[PATH_MAX] = "./test-assets";
+    unifi_profile_t profile;
 
-        mqtt_publish_status(txt);
-        free(txt);
-        cJSON_Delete(status);
+    if (!unifi_profile_load_from_file(profile_path, &profile)) {
+        HA_ERR(ERROR_PROFILE_INVALID, "Error loading profile.json for test");
+        goto cleanup;
     }
 
-    // TODO: perform SFTP upload here. For now just return success.
-    int sftp_rc = 0;
-
-    if (sftp_rc == 0) {
-        cJSON *status = cJSON_CreateObject();
-        cJSON_AddStringToObject(status, "status", "complete");
-        cJSON_AddStringToObject(status, "last_set", target);
-
-        char *txt = cJSON_PrintUnformatted(status);
-
-        mqtt_publish_status(txt);
-        free(txt);
-        cJSON_Delete(status);
-    }
-    else {
-        cJSON *status = cJSON_CreateObject();
-        cJSON_AddStringToObject(status, "status", "error");
-        cJSON_AddStringToObject(status, "error", "SFTP upload error");
-
-        char *txt = cJSON_PrintUnformatted(status);
-
-        mqtt_publish_status(txt);
-        free(txt);
-        cJSON_Delete(status);
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        return;
     }
 
-    cJSON_Delete(root);
-}
+    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+        goto cleanup;
+    }
 
-void handle_set(const char *payload, size_t len) {
-    command_handle_set(payload, len);
+    ok = true;
+
+cleanup: 
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    if (!ok) {
+        status_set_state("Idle");
+    }
+
+    status_set_active_profile("Test");
+    status_set_state("Idle");
 }
