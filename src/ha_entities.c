@@ -6,21 +6,21 @@
 
 
 
-static options_result_t add_holiday_options(cJSON *root, const config_t *cfg, const entity_t *def) {
+static options_result_t add_preset_options(cJSON *root, const config_t *cfg, const entity_t *def) {
     (void)def;
 
-    if (cfg->holiday_cfg.count == 0) {
+    if (cfg->preset_cfg.count == 0) {
         return OPTIONS_ERR_EMPTY_LIST;
     }
 
-    cJSON *holidays = cJSON_AddArrayToObject(root, "options");
+    cJSON *presets = cJSON_AddArrayToObject(root, "options");
 
-    if (!holidays) {
+    if (!presets) {
         return OPTIONS_ERR_UNKNOWN;
     }
 
-    for(size_t i = 0; i < cfg->holiday_cfg.count; i++) {
-        cJSON_AddItemToArray(holidays, cJSON_CreateString(cfg->holiday_cfg.items[i].holiday));
+    for(size_t i = 0; i < cfg->preset_cfg.count; i++) {
+        cJSON_AddItemToArray(presets, cJSON_CreateString(cfg->preset_cfg.items[i].display_name));
     }
 
     return OPTIONS_OK;
@@ -65,15 +65,15 @@ const entity_t HA_ENTITIES[]  = {
         .handle_command = NULL
     }, {
         .component = "select",
-        .object_id = "holiday",
-        .name = "Holiday",
+        .object_id = "preset",
+        .name = "Presets",
         .category = "config",
-        .state_topic = "holiday/selected",
+        .state_topic = "preset/selected",
         .availability_topic ="availability",
-        .command_topic = "cmd/holiday_set",
-        .icon = "mdi:calendar-star",
-        .add_options = add_holiday_options,
-        .handle_command = command_set_holiday
+        .command_topic = "cmd/preset_set",
+        .icon = "mdi:tune-variant",
+        .add_options = add_preset_options,
+        .handle_command = command_set_preset
     }, {
         .component = "text",
         .object_id = "custom_directory",

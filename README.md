@@ -2,7 +2,7 @@
 
 A C-based service that bridges **UniFi Protect doorbell profiles** with **MQTT**
 and **Home Assistant**. It publishes Home Assistant discovery entities, applies
-holiday or custom profiles over SSH, and can download the active profile assets
+presets or custom profiles over SSH, and can download the active profile assets
 from the doorbell.
 
 This project enables deeper, local-only customization of UniFi doorbell
@@ -32,7 +32,7 @@ Use at your own risk.
 **Current state:** Alpha (happy-path functional)
 
 ### Known working
-- Holiday and custom profile application
+- Presets and custom profile application
 - Home Assistant MQTT discovery (controls + sensors)
 - Test asset upload via Home Assistant
 - Profile download from the doorbell
@@ -61,7 +61,7 @@ creates entities for control and status.
 - Connects to MQTT via Eclipse Paho
 - Publishes availability, status, and error topics
 - Publishes Home Assistant discovery entities
-- Applies holiday or custom profiles over SSH
+- Applies presets or custom profiles over SSH
 - Downloads the doorbell’s active profile assets
 - Writes logs to stdout/stderr (Docker-friendly)
 
@@ -72,7 +72,7 @@ creates entities for control and status.
 ```
 ├── src/                 # C sources
 ├── include/             # Public headers
-├── profiles/            # Holiday/custom profiles + downloads
+├── profiles/            # Preset/custom profiles + downloads
 ├── test-assets/         # Sample assets used by the test command (not user-facing)
 ├── tests/               # Unity-based unit tests + fixtures
 ├── bin/                 # Built binary (created by make)
@@ -140,11 +140,20 @@ Start from `config.example.json`.
     "user": "ubnt",
     "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
   },
-  "holidays": {
-    "Christmas": "christmas",
-    "New Years": "new_years",
-    "Easter": "easter"
-  }
+  "presets": [
+    { 
+        "name": "Christmas",
+        "directory": "christmas"
+    },
+    {
+        "name": "New Years",
+        "directory": "new_years"
+    },
+    {
+        "name": "St. Patrick's Day",
+        "directory": "st_pats"
+    }
+  ]
 }
 ```
 
@@ -162,6 +171,29 @@ Each profile must include:
 - `profile.json`
 - One image file (`.png`)
 - One sound file (`.ogg`)
+
+**profile.json example:**
+```json
+{
+    "schemaVersion": 1,
+    "welcome": {
+        "enabled": true,
+        "file": "christmas.png",
+        "count": 57,
+        "durationMs": 100,
+        "loop": true,
+        "guiId": "WELCOME"
+    },
+    "ringButton": {
+        "enabled": true,
+        "file": "christmas.ogg",
+        "repeatTimes": 1,
+        "volume": 100,
+        "soundStateName": "RING_BUTTON_PRESSED"
+    }
+}
+```
+
 
 ---
 

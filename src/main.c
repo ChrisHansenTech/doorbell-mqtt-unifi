@@ -43,7 +43,7 @@ int main(void) {
         goto cleanup;
     }
 
-    if(!profiles_repo_init("./profiles", &cfg.holiday_cfg)) {
+    if(!profiles_repo_init("./profiles", &cfg.preset_cfg)) {
         LOG_FATAL("Profiles initialization failed. Exiting.");
         rc = 1;
         goto cleanup;
@@ -67,7 +67,7 @@ int main(void) {
 
     mqtt_router_ctx_t inbound_ctx;
     inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
-    inbound_ctx.holiday_cfg = &cfg.holiday_cfg;
+    inbound_ctx.preset_cfg = &cfg.preset_cfg;
 
     if (!mqtt_router_start(&inbound_ctx)) {
         LOG_FATAL("MQTT inbound worker failed to start. Exiting.");

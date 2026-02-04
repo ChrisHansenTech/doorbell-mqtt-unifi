@@ -13,6 +13,15 @@
 const char *json_get_string(cJSON *obj, const char *key);
 
 /**
+ * @brief Duplicate and normalize a string value from a cJSON object
+ * 
+ * @param obj 
+ * @param key 
+ * @return char* 
+ */
+char *json_strdup_normalized(cJSON *obj, const char *key);
+
+/**
  * @brief Get a boolean value from a cJSON object
  * 
  * @param obj 

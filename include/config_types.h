@@ -31,17 +31,18 @@ typedef struct {
 } config_ssh_t;
 
 typedef struct {
-    char *holiday;
+    char *display_name;
+    char *key_name;
     char *directory;
-} config_holiday_item_t;
+} config_preset_item_t;
 
 typedef struct {
-    config_holiday_item_t *items;
+    config_preset_item_t *items;
     size_t count;
-} config_holiday_t;
+} config_preset_t;
 
 typedef struct {
     config_mqtt_t mqtt_cfg;
     config_ssh_t ssh_cfg;
-    config_holiday_t holiday_cfg;
+    config_preset_t preset_cfg;
 } config_t;

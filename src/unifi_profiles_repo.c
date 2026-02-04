@@ -13,25 +13,25 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-static const config_holiday_t *g_profiles_cfg = NULL; 
+static const config_preset_t *g_profiles_cfg = NULL; 
 static char *g_profiles_dir = NULL;
 
 static bool profiles_initialized(void) {
     return g_profiles_dir != NULL && g_profiles_cfg != NULL;
 }
 
-static const char *config_get_holiday_directory(const char *holiday_name) {
+static const char *config_get_preset_directory(const char *preset_name) {
     for (size_t i = 0; i < g_profiles_cfg->count; i++) {
-        if (strcasecmp(g_profiles_cfg->items[i].holiday, holiday_name) == 0) {
+        if (strcasecmp(g_profiles_cfg->items[i].display_name, preset_name) == 0) {
             return g_profiles_cfg->items[i].directory;
         }
     }
 
-    LOG_DEBUG("No directory mapping found for holiday '%s'.", holiday_name);
+    LOG_DEBUG("No directory mapping found for preset '%s'.", preset_name);
     return NULL;
 }
 
-bool profiles_repo_init(const char *base_dir, const config_holiday_t *cfg) {
+bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
     if(profiles_initialized()) {
         LOG_ERROR("profiles_init called more than once.");
         return false;
@@ -56,30 +56,30 @@ bool profiles_repo_init(const char *base_dir, const config_holiday_t *cfg) {
     return true;
 }
 
-bool profiles_repo_resolve_holiday(const char *holiday_name, char *out_dir, size_t out_len) {
+bool profiles_repo_resolve_preset(const char *preset_name, char *out_dir, size_t out_len) {
     if (!profiles_initialized()) {
         LOG_ERROR("Called before initializing profiles.");
         return false;
     }
 
-    if (!holiday_name || !out_dir) {
-        LOG_ERROR("Invalid parameters: holiday_name=%p out=%p", (void*)holiday_name, (void*)out_dir);
+    if (!preset_name || !out_dir) {
+        LOG_ERROR("Invalid parameters: preset_name=%p out=%p", (void*)preset_name, (void*)out_dir);
         return false;
     }
     
-    const char *directory = config_get_holiday_directory(holiday_name);
+    const char *directory = config_get_preset_directory(preset_name);
 
     if (!directory) {
-        LOG_WARN("No directory configured for holiday '%s'.", holiday_name);
+        LOG_WARN("No directory configured for preset '%s'.", preset_name);
         return false;
     }
 
     if (!utils_build_path(out_dir, out_len, g_profiles_dir, directory)) {
-        LOG_ERROR("Failed to build path for '%s' (directory %s).", holiday_name, directory);
+        LOG_ERROR("Failed to build path for '%s' (directory %s).", preset_name, directory);
         return false;
     }
 
-    LOG_DEBUG("Resolved holiday '%s' to asset directory '%s'.", holiday_name, directory);
+    LOG_DEBUG("Resolved preset '%s' to asset directory '%s'.", preset_name, directory);
 
     return true;  
 }

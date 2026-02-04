@@ -14,18 +14,18 @@
  * @return true 
  * @return false 
  */
-bool profiles_repo_init(const char *base_dir, const config_holiday_t *cfg);
+bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg);
 
 /**
- * @brief Resolve the given holiday name to an asset directory.
+ * @brief Resolve the given preset name to an asset directory.
  * 
- * @param holiday_name 
+ * @param preset_name 
  * @param out_dir 
  * @param out_len 
  * @return true 
  * @return false 
  */
-bool profiles_repo_resolve_holiday(const char *holiday_name, char *out_dir, size_t out_len);
+bool profiles_repo_resolve_preset(const char *preset_name, char *out_dir, size_t out_len);
 
 /**
  * @brief Resolve a custom asset directory.

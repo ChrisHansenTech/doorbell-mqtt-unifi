@@ -1,5 +1,8 @@
 #include "utils_json.h"
 #include "cJSON.h"
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
 
 const char *json_get_string(cJSON *obj, const char *key) {
     if (!obj || !key) {
@@ -8,6 +11,47 @@ const char *json_get_string(cJSON *obj, const char *key) {
 
     cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
     return (cJSON_IsString(value) && value->valuestring) ? value->valuestring : NULL;
+}
+
+char *json_strdup_normalized(cJSON *obj, const char *key) {
+    if (!obj || !key) {
+        return NULL;
+    }
+
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
+
+    if (!value || (!cJSON_IsString(value) && !value->valuestring)) {
+        return NULL;
+    }
+
+    const char *string = value->valuestring;
+
+    while (*string && isspace((unsigned char)*string)) {
+        string++;
+    }
+
+    const char *end = string + strlen(string);
+    while (end > string && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+
+    size_t len = (size_t)(end - string);
+
+    if (len == 0) {
+        return NULL;
+    }
+
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        out[i] = (char)tolower((unsigned char)string[i]);
+    }
+
+    out[len] = '\0';
+    return out;
 }
 
 

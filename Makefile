@@ -39,15 +39,23 @@ CORE_OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(CORE_SRCS))
 # Unity test framework
 UNITY_DIR   := tests/third_party/unity
 
-# Expand all test_*.c at make time
-TEST_SRCS   := $(wildcard tests/test_*.c) \
-               $(UNITY_DIR)/unity.c
+# ===== Tests: one binary per test file =====
 
-TEST_OBJS   := $(patsubst %.c,$(OBJDIR)/%.o,$(TEST_SRCS))
-TEST_BIN    := $(BINDIR)/$(TARGET)_tests
+UNITY_SRC := $(UNITY_DIR)/unity.c
+UNITY_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(UNITY_SRC))
 
-# Test objects need Unity's include path
-$(TEST_OBJS): CFLAGS += -I$(UNITY_DIR)
+# Each tests/test_*.c will build to bin/test_*
+TEST_SUITE_SRCS := $(wildcard tests/test_*.c)
+TEST_SUITE_OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(TEST_SUITE_SRCS))
+TEST_BINS       := $(patsubst tests/test_%.c,$(BINDIR)/test_%,$(TEST_SUITE_SRCS))
+
+# Optional shared test support code (config mocks, fixtures helpers, etc.)
+TEST_SUPPORT_SRCS := $(wildcard tests/support/*.c)
+TEST_SUPPORT_OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(TEST_SUPPORT_SRCS))
+
+# Test objects need Unity + support include paths
+$(UNITY_OBJ) $(TEST_SUITE_OBJS) $(TEST_SUPPORT_OBJS): CFLAGS += -I$(UNITY_DIR) -Itests/support
+
 
 # ===== Toolchain / Flags =====
 CC    := gcc
@@ -120,14 +128,21 @@ run: $(BINDIR)/$(TARGET)
 
 
 # ===== Tests =====
-test: dirs $(TEST_BIN)
-	$(TEST_BIN)
-
-$(TEST_BIN): $(CORE_OBJS) $(TEST_OBJS)
-	$(CC) $(LDFLAGS) $(CORE_OBJS) $(TEST_OBJS) -o $@ $(LDLIBS)
-
-test-bin: dirs $(TEST_BIN)
+test-bin: dirs $(TEST_BINS)
 	@true
+
+test: test-bin
+	@set -e; \
+	for t in $(TEST_BINS); do \
+		echo "==> $$t"; \
+		$$t; \
+	done
+
+# Link one test binary per suite
+# Example: bin/test_config links build/tests/test_config.o + unity + support + core
+$(BINDIR)/test_%: $(CORE_OBJS) $(UNITY_OBJ) $(TEST_SUPPORT_OBJS) $(OBJDIR)/tests/test_%.o | $(BINDIR)
+	$(CC) $(LDFLAGS) $(CORE_OBJS) $(UNITY_OBJ) $(TEST_SUPPORT_OBJS) $(OBJDIR)/tests/test_$*.o -o $@ $(LDLIBS)
+
 
 clean:
 	@$(RM) -r $(OBJDIR)

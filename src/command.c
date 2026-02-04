@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void command_set_holiday(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
     if (ctx == NULL || payload == NULL || payloadLen == 0) {
         return;
     }
@@ -27,13 +27,13 @@ void command_set_holiday(const mqtt_router_ctx_t *ctx, const char *payload, size
     char profile_path[PATH_MAX];
     unifi_profile_t profile;
 
-    if (!profiles_repo_resolve_holiday(payload, profile_path, sizeof(profile_path))) {
-        HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Profile directory for holiday '%s' not found", payload);
+    if (!profiles_repo_resolve_preset(payload, profile_path, sizeof(profile_path))) {
+        HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Profile directory for preset '%s' not found", payload);
         goto cleanup;
     }
 
     if (!unifi_profile_load_from_file(profile_path, &profile)) {
-        HA_ERRF(ERROR_PROFILE_INVALID, "Error loading profile.json for holiday '%s'", payload);
+        HA_ERRF(ERROR_PROFILE_INVALID, "Error loading profile.json for preset '%s'", payload);
         goto cleanup;
     }
 

@@ -4,6 +4,7 @@
 #include "utils.h"
 
 #include "cJSON.h"
+#include "utils_json.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -105,6 +106,13 @@ static int cfg_get_int_from_env_json_default(const cJSON *root, const char *json
     return default_value;
 }
 
+static bool preset_key_exists(const config_preset_item_t *items, size_t count, const char *key) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(items[i].key_name, key) == 0) return true;
+    }
+    return false;
+}
+
 static void config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
     char host[40];
     
@@ -156,65 +164,86 @@ static void config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
 }
 
 static void config_load_ssh(config_ssh_t *ssh_cfg, const cJSON *root) {
-    cfg_set_str_from_env_json_default(ssh_cfg->host, sizeof(ssh_cfg->host), root, "host", "ssh_host", "localhost", "host", false);
+    cfg_set_str_from_env_json_default(ssh_cfg->host, sizeof(ssh_cfg->host), root, "host", "SSH_HOST", "localhost", "host", false);
     
-    ssh_cfg->port = cfg_get_int_from_env_json_default(root, "port", "ssh_port", 22);
+    ssh_cfg->port = cfg_get_int_from_env_json_default(root, "port", "SSH_PORT", 22);
 
-    cfg_set_str_from_env_json_default(ssh_cfg->user, sizeof(ssh_cfg->user), root, "user", "ssh_user", "ubnt", "user", false);
+    cfg_set_str_from_env_json_default(ssh_cfg->user, sizeof(ssh_cfg->user), root, "user", "SSH_USER", "ubnt", "user", false);
 
     cfg_set_str_from_env_json_default(ssh_cfg->password_env, sizeof(ssh_cfg->password_env), root, "password_env", NULL, NULL, "UNIFI_PROTECT_RECOVERY_CODE", false);
 
 }
 
-void config_load_holidays(config_holiday_t *holiday_cfg, const cJSON *root) {
-    if(!holiday_cfg || !root) {
+static void config_load_presets(config_preset_t *preset_cfg, const cJSON *presets) {
+    if(!preset_cfg || !presets) {
         return;
     }
 
-    holiday_cfg->items = NULL;
-    holiday_cfg->count = 0;
+    preset_cfg->items = NULL;
+    preset_cfg->count = 0;
 
-    size_t count = cJSON_GetArraySize(root);
+    size_t count = cJSON_GetArraySize(presets);
 
     if (count <= 0) {
-        LOG_WARN("No holidays configured in the 'holiday' section");
+        LOG_WARN("No presets configured in the 'presets' section");
         return;
     }
 
-    config_holiday_item_t *items = calloc((size_t)count, sizeof(config_holiday_item_t));
+    config_preset_item_t *items = calloc((size_t)count, sizeof(config_preset_item_t));
     if (!items) {
-        LOG_ERROR("Out of memory allocating holiday mappings (count=%zu)", count);
+        LOG_ERROR("Out of memory allocating preset mappings (count=%zu)", count);
         return;
     }
-    
+
     size_t i = 0, out = 0;
-    for (cJSON *item = root->child; item && i < count; item = item->next, i++) {
-        const char *name = item->string;
-        const char *directory = cJSON_GetStringValue(item);
-
+    for (cJSON *item = presets->child; item && i < count; item = item->next, i++) {
+        const char *name = json_get_string(item, "name");
+        const char *directory = json_get_string(item, "directory");
+        
         if (!name || !directory) {
-            LOG_WARN("Skipping invalid holiday entry at index %ld (missing name or directory).", i);
-            continue;
+            LOG_ERROR("Invalid preset entry at index %ld (missing name or directory).", i);
+            goto fail;
+        }
+        
+        char *key_name = json_strdup_normalized(item, "name");
+
+        if (preset_key_exists(items, out, key_name)) {
+            LOG_ERROR("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
+            free(key_name);
+            goto fail;
         }
 
-        char *h = strdup(name);
-        char *d = strdup(directory);
-        if (!h || !d) {
-            free(h);
-            free(d);
-            LOG_ERROR("Out of memory duplicating holiday mapping at index %zu", i);
-            continue;
+        char *display_name = strdup(name);
+        char *dir = strdup(directory);
+        if (!display_name || !dir) {
+            free(key_name);
+            LOG_ERROR("Out of memory duplicating preset mapping at index %zu", i);
+            goto fail;
         }
 
-        items[out].holiday = h;
-        items[out].directory = d;
+        items[out].display_name = display_name;
+        items[out].key_name = key_name;
+        items[out].directory = dir;
         out++;
     }
 
-    holiday_cfg->items = items;
-    holiday_cfg->count = out;
+    preset_cfg->items = items;
+    preset_cfg->count = out;
 
-    LOG_INFO("Loaded %ld holiday mappings from configuration.", holiday_cfg->count);
+    LOG_INFO("Loaded %ld preset mappings from configuration.", preset_cfg->count);
+    return;
+
+fail:
+    for (size_t j = 0; j < out; j++) {
+        free(items[j].display_name);
+        free(items[j].key_name);
+        free(items[j].directory);
+    }
+    free(items);
+
+    preset_cfg->items = NULL;
+    preset_cfg->count = 0;
+    return;
 }
 
 bool config_load(const char *filename, config_t *cfg) {
@@ -262,15 +291,15 @@ bool config_load(const char *filename, config_t *cfg) {
     
     config_load_ssh(&cfg->ssh_cfg, ssh);
 
-    cJSON *holidays = cJSON_GetObjectItem(root, "holidays");
-    if (!holidays || !cJSON_IsObject(holidays)) {
-        LOG_ERROR("Missing or invalid 'holidays' section in '%s'", filename);
+    cJSON *presets = cJSON_GetObjectItem(root, "presets");
+    if (!presets || !cJSON_IsArray(presets)) {
+        LOG_ERROR("Missing or invalid 'presets' section in '%s'", filename);
         cJSON_Delete(root);
         free(json_buffer);
         return false;
     }
 
-    config_load_holidays(&cfg->holiday_cfg, holidays);
+    config_load_presets(&cfg->preset_cfg, presets);
 
     cJSON_Delete(root);
     free(json_buffer);
@@ -284,13 +313,14 @@ void config_free(config_t *cfg) {
         return;
     }
 
-    for (size_t i = 0; i < cfg->holiday_cfg.count; i++) {
-        free(cfg->holiday_cfg.items[i].holiday);
-        free(cfg->holiday_cfg.items[i].directory);
+    for (size_t i = 0; i < cfg->preset_cfg.count; i++) {
+        free(cfg->preset_cfg.items[i].display_name);
+        free(cfg->preset_cfg.items[i].key_name);
+        free(cfg->preset_cfg.items[i].directory);
     }
 
-    free(cfg->holiday_cfg.items);
+    free(cfg->preset_cfg.items);
 
-    cfg->holiday_cfg.items = NULL;
-    cfg->holiday_cfg.count = 0;
+    cfg->preset_cfg.items = NULL;
+    cfg->preset_cfg.count = 0;
 }
