@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "utils.h"
 
+#include <errno.h>
 #include <glob.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -46,13 +47,13 @@ bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
     g_profiles_dir = strdup(base_dir);
 
     if (!g_profiles_dir) {
-        LOG_ERROR("Failed to allocate memory for assets base directory.");
+        LOG_ERROR("Failed to allocate memory for profile base directory.");
         return false;
     }
 
     g_profiles_cfg = cfg;
 
-    LOG_INFO("Assets initialized with base directory '%s'.", g_profiles_dir);
+    LOG_INFO("Profile repository initialized with base directory '%s'.", g_profiles_dir);
     return true;
 }
 
@@ -79,14 +80,14 @@ bool profiles_repo_resolve_preset(const char *preset_name, char *out_dir, size_t
         return false;
     }
 
-    LOG_DEBUG("Resolved preset '%s' to asset directory '%s'.", preset_name, directory);
+    LOG_DEBUG("Resolved preset '%s' to profile directory '%s'.", preset_name, directory);
 
     return true;  
 }
 
 bool profiles_repo_resolve_custom(const char *custom_directory, char *out_dir, size_t out_len) {
     if (!profiles_initialized()) {
-        LOG_ERROR("Called before initializing assets.");
+        LOG_ERROR("Called before initializing profiles.");
         return false;
     }
 
@@ -100,8 +101,92 @@ bool profiles_repo_resolve_custom(const char *custom_directory, char *out_dir, s
         return false;
     }
 
-    LOG_DEBUG("Resolved custom asset directory '%s'.", custom_directory);
+    LOG_DEBUG("Resolved custom profile directory '%s'.", custom_directory);
     return true;
+}
+
+bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len) {
+    if (!profiles_initialized()) {
+        LOG_ERROR("Called before initializing profile repo");
+        return false;
+    }
+    
+    if (!out_dir) {
+        LOG_ERROR("Invalid parameters: out_dir=%p", (void*)out_dir);
+        return false;
+    }
+
+    char temp_path[PATH_MAX];
+
+    if (!utils_build_path(temp_path, sizeof(temp_path), g_profiles_dir, "tmp")) {
+        LOG_ERROR("Failed to build path for directory '%s/tmp'", g_profiles_dir);
+        return false;
+    }
+
+    if (!utils_create_directory(temp_path)) {
+        LOG_ERROR("Failed to create directory '%s'", temp_path);
+        return false;
+    }
+
+    char template[PATH_MAX];
+    snprintf(template, sizeof(template), "%s/tmp/download_XXXXXX", g_profiles_dir);
+    
+    char *temp_dir = mkdtemp(template);
+
+    if (!temp_dir) {
+        LOG_ERROR("Failed to create temp directory for '%s': %s", template, strerror(errno));
+        return false;
+    }
+
+    int len = snprintf(out_dir, out_len, "%s", temp_dir);
+
+    if ((size_t)len < strlen(temp_dir)) {
+        LOG_ERROR("Download temp path was truncated");
+        return false;
+    }
+
+    return true;
+}
+
+bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial) {
+    if (!profiles_initialized()) {
+        LOG_ERROR("Called before initializing profile repo");
+        return false;
+    }
+
+    if (!temp_dir) {
+        LOG_ERROR("Invalid parameters: temp_dir=%p", (void*)temp_dir);
+        return false;
+    }
+
+    char ts[32];
+    utils_build_timestamp(ts, sizeof(ts));
+
+    char download_path[PATH_MAX];
+    char final_path[PATH_MAX];
+
+    if (!utils_build_path(download_path, sizeof(download_path), g_profiles_dir, partial ? "partial" : "downloads")) {
+        LOG_ERROR("Failed to build path '%s/%s'", g_profiles_dir, partial ? "partial" : "downloads");
+        return false;
+    }
+
+    if (!utils_create_directory(download_path)) {
+        LOG_ERROR("Failed to create directory '%s'", download_path);
+        return false;
+    }
+
+    if (!utils_build_path(final_path, sizeof(final_path), download_path, ts)) {
+        LOG_ERROR("Failed to build path '%s/%s'", download_path, ts);
+        return false;
+    }
+
+    if (rename(temp_dir, final_path) != 0) {
+        LOG_ERROR("Failed to rename directory '%s' to '%s'", temp_dir, final_path);
+        return false;
+    }
+
+    return true;
+
 }
 
 void profiles_repo_shutdown(void) {

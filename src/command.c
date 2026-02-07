@@ -1,7 +1,6 @@
 #include "command.h"
 #include "errors.h"
 #include "ha_status.h"
-#include "ha_topics.h"
 #include "mqtt_router_types.h"
 #include "ssh.h"
 #include "unifi_profile.h"
@@ -129,27 +128,14 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   bool partial_download = true;
   char local_path[PATH_MAX];
-  char tmp_path[PATH_MAX];
+  char temp_path[PATH_MAX];
   char final_path[PATH_MAX];
   unifi_profile_t profile;
 
   status_set_state("Downloading");
 
-  if (!utils_create_directory("profiles/.tmp")) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp directory.");
-  }
-
-  char ts[32];
-  utils_build_timestamp(ts, sizeof(ts));
-
-  if (!utils_build_path(tmp_path, sizeof(tmp_path), "profiles/.tmp", ts)) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path.");
-    return;
-  }
-
-  if (!utils_create_directory(tmp_path)) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp directory.");
-    return;
+  if (!profiles_repo_create_temp_profile_dir(temp_path, sizeof(temp_path))) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path");
   }
 
   ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
@@ -158,15 +144,13 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
     return;
   }
 
-  if (!unifi_profile_download_and_load(session, tmp_path, &profile)) {
+  if (!unifi_profile_download_and_load(session, temp_path, &profile)) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to download profile assets");
     goto cleanup;
   }
 
-  if (!utils_build_path(local_path, sizeof(local_path), tmp_path,
-                        "profile.json")) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
-           "Failed to create path for profile.json");
+  if (!utils_build_path(local_path, sizeof(local_path), temp_path, "profile.json")) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create path for profile.json");
     goto cleanup;
   }
 
@@ -177,14 +161,8 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   partial_download = false;
 
-  if (!utils_build_path(final_path, sizeof(final_path), "profiles/downloads/",
-                        ts)) {
-    goto cleanup;
-  }
-
-  if (rename(tmp_path, final_path) != 0) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
-           "Failed to rename download temp path.");
+  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     goto cleanup;
   }
 
@@ -194,12 +172,8 @@ cleanup:
   }
 
   if (partial_download) {
-    if (utils_build_path(final_path, sizeof(final_path), "profiles/partial/",
-                         ts)) {
-      if (rename(tmp_path, final_path) != 0) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED,
-               "Failed to rename download temp path.");
-      }
+    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     }
   }
 
@@ -217,7 +191,7 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
 
     bool ok = false;
     ssh_session_t *session = NULL;
-    char profile_path[PATH_MAX] = "./test-assets";
+    char profile_path[PATH_MAX] = "./test-profile";
     unifi_profile_t profile;
 
     if (!unifi_profile_load_from_file(profile_path, &profile)) {

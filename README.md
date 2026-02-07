@@ -73,7 +73,7 @@ creates entities for control and status.
 ├── src/                 # C sources
 ├── include/             # Public headers
 ├── profiles/            # Preset/custom profiles + downloads
-├── test-assets/         # Sample assets used by the test command (not user-facing)
+├── test-profile/        # Sample assets used by the test command (not user-facing)
 ├── tests/               # Unity-based unit tests + fixtures
 ├── bin/                 # Built binary (created by make)
 ├── build/               # Object files and dependency data (created by make)
