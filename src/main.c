@@ -13,6 +13,10 @@
 
 #include <stdbool.h>
 #include <signal.h>
+#include <stdlib.h>
+
+#define DEFAULT_CONFIG_PATH   "/config/config.json"
+#define DEFAULT_PROFILES_DIR  "/profiles"
 
 static volatile int running = 1;
 static void handle_signal(int sig) {
@@ -28,8 +32,18 @@ int main(void) {
 
     print_banner();
 
-    if (!utils_delete_directory("./tmp")) {
-        LOG_ERROR("Error cleaning '.tmp'");
+    const char *config_path = getenv("CONFIG_PATH");
+    if (!config_path) {
+        config_path = DEFAULT_CONFIG_PATH;
+    }
+
+    const char *profiles_dir = getenv("PROFILES_DIR");
+    if (!profiles_dir) {
+        profiles_dir = DEFAULT_PROFILES_DIR;
+    }
+
+    if (!utils_delete_directory("/tmp/doorbell-mqtt-unifi")) {
+        LOG_WARN("Did not clean '/tmp/doorbell-mqtt-unifi'");
     }
 
     config_t cfg = {0};
@@ -37,13 +51,13 @@ int main(void) {
     bool mqtt_router_started = false;
     int rc = 0;
 
-    if (!config_load("config.json", &cfg)) {
+    if (!config_load(config_path, &cfg)) {
         LOG_FATAL("Configuration load failed. Exiting.");
         rc = 1;
         goto cleanup;
     }
 
-    if(!profiles_repo_init("./profiles", &cfg.preset_cfg)) {
+    if(!profiles_repo_init(profiles_dir, &cfg.preset_cfg)) {
         LOG_FATAL("Profiles initialization failed. Exiting.");
         rc = 1;
         goto cleanup;

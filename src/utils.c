@@ -182,7 +182,7 @@ void utils_build_timestamp(char *out, size_t out_size) {
 
     localtime_r(&now, &tm_now);
 
-    strftime(out, out_size, "%Y%m%d-%H%M%S", &tm_now);
+    strftime(out, out_size, "%Y%m%d_%H%M%S", &tm_now);
 }
 
 void to_human_readable(const char *input, char *output, size_t out_size) {
@@ -259,7 +259,7 @@ bool utils_delete_directory(const char *path) {
     DIR *dir = opendir(path);
 
     if (!dir) {
-        LOG_ERROR("Failed to open '%s': %s", path, strerror(errno));
+        LOG_WARN("Failed to open '%s': %s", path, strerror(errno));
         return false;
     }
 

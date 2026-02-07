@@ -6,9 +6,11 @@
 #include "unifi_profile_conf.h"
 #include "utils.h"
 
+#include <errno.h>
 #include <linux/limits.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 bool unifi_conf_download(ssh_session_t *session, const char *tmp_dir) {
@@ -122,8 +124,9 @@ bool unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_
         return false;
     }
 
-    char temp_path[PATH_MAX];
-    char remote_temp_path[PATH_MAX] = "/tmp/doorbell-mqtt-upload/";
+    bool result = true;
+
+    char remote_temp_path[PATH_MAX] = "/tmp/doorbell-mqtt-unifi/";
     
     char local_img_path[PATH_MAX];
     char local_img_md5_path[PATH_MAX];
@@ -135,42 +138,42 @@ bool unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_
     char md5_file[265];
     char ssh_cmd[8192];
 
-    if (!utils_create_directory("./tmp")) {
-        LOG_ERROR("Failed to create ./tmp directory");
+    if (!utils_create_directory("/tmp/doorbell-mqtt-unifi")) {
+        LOG_ERROR("Failed to create /tmp/doorbell-mqtt-unifi directory");
         return false;
     }
 
-    char ts[32];
-    utils_build_timestamp(ts, sizeof(ts));
+    char template[] = "/tmp/doorbell-mqtt-unifi/upload-XXXXXX";
+    char *temp_dir = mkdtemp(template);
 
-    if (!utils_build_path(temp_path, sizeof(temp_path), "./tmp", ts)) {
-        LOG_ERROR("Failed to create temp path");
+    if (!temp_dir) {
+        LOG_ERROR("Failed to create temp directory for '%s': %s", template, strerror(errno));
         return false;
     }
-
-    if (!utils_create_directory(temp_path)) {
-        LOG_ERROR("Failed to create directory '%s'", temp_path);
-        return false;
-    }
-
-    if (!unifi_conf_download(session, temp_path)) {
-        return false;
+    
+    if (!unifi_conf_download(session, temp_dir)) {
+        result = false;
+        goto cleanup;
     }
 
     if (!ssh_cmd_rm_rf(ssh_cmd, sizeof(ssh_cmd), remote_temp_path)) {
-        return false;
+        result = false;
+        goto cleanup;
     }
 
     if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
-        return false;
+        result = false;
+        goto cleanup;
     }
 
     if (!ssh_cmd_mkdir(ssh_cmd, sizeof(ssh_cmd), remote_temp_path)) {
-        return false;
+        result = false;
+        goto cleanup;
     }
 
     if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
-        return false;
+        result = false;
+        goto cleanup;
     }
 
     if (profile->welcome.enabled) {
@@ -178,57 +181,69 @@ bool unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_
         char lcm_in[PATH_MAX];
         char lcm_out[PATH_MAX];
 
-        if (!utils_build_path(lcm_in, sizeof(lcm_in), temp_path, "ubnt_lcm_gui.conf")) {
+        if (!utils_build_path(lcm_in, sizeof(lcm_in), temp_dir, "ubnt_lcm_gui.conf")) {
             LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf");
-            return false;
+            result = false;
+            goto cleanup;
         }
 
-        if (!utils_build_path(lcm_out, sizeof(lcm_out), temp_path, "ubnt_lcm_gui.conf.patched")) {
+        if (!utils_build_path(lcm_out, sizeof(lcm_out), temp_dir, "ubnt_lcm_gui.conf.patched")) {
             LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf.patched");
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!unifi_profile_patch_lcm_gui_conf(lcm_in, lcm_out, profile)) {
             LOG_ERROR("Failed to patch ubnt_lcm_gui.conf");
-            return false;
+            result = false;
+            goto cleanup;
         }
         
         if (!utils_build_path(local_img_path, sizeof(local_img_path), profile_dir, profile->welcome.file)) {
             LOG_ERROR("Error building path for image '%s'", profile->welcome.file);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_file_exists(local_img_path)) {
             LOG_ERROR("File '%s' does not exist", local_img_path);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_md5_file_hex(local_img_path, md5_hex)) {
             LOG_ERROR("Failed to create MD5 hash for '%s'", local_img_path);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         snprintf(md5_file, sizeof(md5_file), "%s.md5", profile->welcome.file);
 
-        if (!utils_build_path(local_img_md5_path, sizeof(local_img_md5_path), temp_path, md5_file)) {
+        if (!utils_build_path(local_img_md5_path, sizeof(local_img_md5_path), temp_dir, md5_file)) {
             LOG_ERROR("Failed to create MD5 file path for '%s'", md5_file);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_write_file(local_img_md5_path, md5_hex)) {
             LOG_ERROR("Failed to write MD5 file '%s'", local_img_md5_path);
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, local_img_path, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, local_img_md5_path, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, lcm_out, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
     }
 
@@ -237,62 +252,75 @@ bool unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_
         char sounds_in[PATH_MAX];
         char sounds_out[PATH_MAX];
 
-        if (!utils_build_path(sounds_in, sizeof(sounds_in), temp_path, "ubnt_sounds_leds.conf")) {
+        if (!utils_build_path(sounds_in, sizeof(sounds_in), temp_dir, "ubnt_sounds_leds.conf")) {
             LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf");
-            return false;
+            result = false;
+            goto cleanup;
         }
 
-        if (!utils_build_path(sounds_out, sizeof(sounds_out), temp_path, "ubnt_sounds_leds.conf.patched")) {
+        if (!utils_build_path(sounds_out, sizeof(sounds_out), temp_dir, "ubnt_sounds_leds.conf.patched")) {
             LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf.patched");
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!unifi_profile_patch_sounds_leds_conf(sounds_in, sounds_out, profile)) {
             LOG_ERROR("Failed to patch ubnt_sounds_leds.conf");
-            return false;
+            result = false;
+            goto cleanup;
         }
         
         if (!utils_build_path(local_snd_path, sizeof(local_snd_path), profile_dir, profile->ring_button.file)) {
             LOG_ERROR("Error building path for sound '%s'", profile->ring_button.file);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_file_exists(local_snd_path)) {
             LOG_ERROR("File '%s' does not exist", local_snd_path);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_md5_file_hex(local_snd_path, md5_hex)) {
             LOG_ERROR("Failed to create MD5 hash for '%s'", local_snd_path);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         snprintf(md5_file, sizeof(md5_file), "%s.md5", profile->ring_button.file);
 
-        if (!utils_build_path(local_snd_md5_path, sizeof(local_snd_md5_path), temp_path, md5_file)) {
+        if (!utils_build_path(local_snd_md5_path, sizeof(local_snd_md5_path), temp_dir, md5_file)) {
             LOG_ERROR("Failed to create MD5 file path for '%s'", md5_file);
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!utils_write_file(local_snd_md5_path, md5_hex)) {
             LOG_ERROR("Failed to write MD5 file '%s'", local_snd_md5_path);
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, local_snd_path, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, local_snd_md5_path, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
 
         if (!ssh_scp_upload_file(session, sounds_out, remote_temp_path, 0644)) {
-            return false;
+            result = false;
+            goto cleanup;
         }
     }
 
     if (!build_apply_profile_command(ssh_cmd, sizeof(ssh_cmd), remote_temp_path, profile->welcome.enabled ? profile->welcome.file : NULL, profile->ring_button.enabled ? profile->ring_button.file : NULL)) {
-        return false;
+        result = false;
+        goto cleanup;
     }
 
     char *out = NULL, *err = NULL;
@@ -300,9 +328,14 @@ bool unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_
 
     if (!ssh_exec_command(session, ssh_cmd, &out, &out_len, &err, &err_len)) {
         LOG_ERROR("Error %s", err);
-        
-        return false;
+        result = false;
+        goto cleanup;
     }
 
-    return true;
+cleanup:
+    if (!utils_delete_directory(temp_dir)) {
+        LOG_WARN("Failed to delete '%s'", temp_dir);
+    }
+
+    return result;
 }
