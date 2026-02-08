@@ -270,11 +270,13 @@ bool config_load(const char *filename, config_t *cfg) {
         return false;
     }
 
+    free(json_buffer);
+    json_buffer = NULL;
+
     cJSON *mqtt = cJSON_GetObjectItem(root, "mqtt");
     if (!mqtt || !cJSON_IsObject(mqtt)) {
         LOG_ERROR("Missing or invalid 'mqtt' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
 
@@ -285,7 +287,6 @@ bool config_load(const char *filename, config_t *cfg) {
     if (!ssh || !cJSON_IsObject(ssh)) {
         LOG_ERROR("Missing or invalid 'ssh' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
     
@@ -295,14 +296,12 @@ bool config_load(const char *filename, config_t *cfg) {
     if (!presets || !cJSON_IsArray(presets)) {
         LOG_ERROR("Missing or invalid 'presets' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
 
     config_load_presets(&cfg->preset_cfg, presets);
 
     cJSON_Delete(root);
-    free(json_buffer);
 
     LOG_INFO("Configuration loaded successfully from %s", filename);
     return true;

@@ -43,7 +43,11 @@ bool unifi_profile_load_from_file(const char *path, unifi_profile_t *p) {
     if (!root) {
         LOG_ERROR("JSON parsing error in %s before: %s", profile_path, error_ptr ? error_ptr : "(unknown position)");
         free(json_buffer);
+        return false;
     }
+
+    free(json_buffer);
+    json_buffer = NULL;
 
     if (!json_get_int(root, "schemaVersion", &p->schema_version)) {
         LOG_ERROR("Failed to load schema version using default of 1");

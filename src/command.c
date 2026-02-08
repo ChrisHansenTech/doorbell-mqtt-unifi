@@ -161,7 +161,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   partial_download = false;
 
-  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     goto cleanup;
   }
@@ -172,7 +172,7 @@ cleanup:
   }
 
   if (partial_download) {
-    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
         HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     }
   }
