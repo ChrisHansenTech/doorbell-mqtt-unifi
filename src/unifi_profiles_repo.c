@@ -1,5 +1,4 @@
 #include "unifi_profiles_repo.h"
-#include "cJSON.h"
 #include "config_types.h"
 #include "logger.h"
 #include "utils.h"
@@ -148,7 +147,7 @@ bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len) {
     return true;
 }
 
-bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial) {
+bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, char *out, size_t out_len) {
     if (!profiles_initialized()) {
         LOG_ERROR("Called before initializing profile repo");
         return false;
@@ -185,6 +184,12 @@ bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial) {
         return false;
     }
 
+    int len = snprintf(out, out_len, "%s", final_path);
+
+    if ((size_t)len < strlen(final_path)) {
+        LOG_WARN("Out value of '%s' was truncated from '%s'", out, final_path);
+    }
+    
     return true;
 
 }
