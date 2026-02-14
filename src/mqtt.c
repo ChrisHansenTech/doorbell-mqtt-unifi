@@ -147,12 +147,12 @@ bool mqtt_init(const config_mqtt_t *cfg_mqtt_in) {
 
     MQTTClient_setCallbacks(client, NULL, conn_lost, msg_arrived, delivered);
 
-    //rc = mqtt_connect_internal(false);
+    rc = mqtt_connect_internal(false);
 
-    //if (rc != MQTTCLIENT_SUCCESS) {
-    //    MQTTClient_destroy(&client);
-    //    return false;
-    //}
+    if (rc != MQTTCLIENT_SUCCESS) {
+        MQTTClient_destroy(&client);
+        return false;
+    }
 
     return true;
 }

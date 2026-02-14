@@ -84,28 +84,12 @@ bool status_error_changed(error_code_t code, const char *message)
     return false;
 }
 
-void status_set_last_applied_profile(const char *profile) {
+void status_set_active_profile(const char *profile) {
     char buffer[255];
 
-    ha_build_topic(buffer, sizeof(buffer), "last_applied_profile");
+    ha_build_topic(buffer, sizeof(buffer), "active_profile");
 
     mqtt_publish(buffer, profile, 1, 1);
-}
-
-void status_set_preset_selected(const char *preset) {
-    char buffer[255];
-
-    ha_build_topic(buffer, sizeof(buffer), "preset/selected");
-
-    mqtt_publish(buffer, preset, 1, 1);
-}
-
-void status_set_custom_directory(const char *directory) {
-    char buffer[255];
-
-    ha_build_topic(buffer, sizeof(buffer), "custom/directory");
-
-    mqtt_publish(buffer, directory, 1, 1);
 }
 
 void status_set_availability(bool available) {

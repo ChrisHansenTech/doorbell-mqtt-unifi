@@ -49,18 +49,15 @@ bool profiles_repo_resolve_custom(const char *custom_directory, char *out_dir, s
 bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len);
 
 /**
- * @brief Rename the temporary profile directory to a final location. If partial is true, it will be moved to a "partial" 
- *        subdirectory to indicate an incomplete download. Otherwise, it will be moved to a "downloads" subdirectory. 
- *        The final path will be returned in out.
+ * @brief   Rename the given temporary directory to a final location in the profiles/downloads directory. 
+ *          If partial is true, the final location is profiles/partial directory.
  * 
  * @param temp_dir 
  * @param partial 
- * @param out 
- * @param out_len 
  * @return true 
  * @return false 
  */
-bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, char *out, size_t out_len);
+bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial);
 
 
 /**

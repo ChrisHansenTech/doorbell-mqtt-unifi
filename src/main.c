@@ -91,7 +91,7 @@ int main(void) {
 
     mqtt_router_started = true;
 
-    ha_routes_register_commands();
+    ha_topic_subscribe_commands();
 
     while (running) {
         mqtt_loop(100);

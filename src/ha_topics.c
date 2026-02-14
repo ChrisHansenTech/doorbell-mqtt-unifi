@@ -40,27 +40,13 @@ void ha_topic_subscribe_commands(void) {
     for (size_t i = 0; i < HA_ENTITIES_COUNT; i++) {
         const entity_t *ent = &HA_ENTITIES[i];
 
-        if(!ent->command_topic || ent->command_topic[0] == '\0') {
+        if(ent->command_topic == NULL || ent->command_topic[0] == '\0') {
             continue;
         }
 
         char buffer[256];
         ha_build_topic(buffer, sizeof(buffer), ent->command_topic);
         mqtt_subscribe(buffer);
-    }
-}
-
-void  ha_routes_register_commands(void) {
-    for (size_t i = 0; i < HA_ENTITIES_COUNT; i++) {
-        const entity_t *ent = &HA_ENTITIES[i];
-
-        if(!ent->command_topic || ent->command_topic[0] == '\0') {
-            continue;
-        }
-
-        char buffer[256];
-        ha_build_topic(buffer, sizeof(buffer), ent->command_topic);
         mqtt_routes_add(buffer, ent->handle_command);
     }
 }
-
