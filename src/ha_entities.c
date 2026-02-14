@@ -54,10 +54,10 @@ const entity_t HA_ENTITIES[]  = {
         .handle_command = NULL
     }, {
         .component = "sensor",
-        .object_id = "active_profile",
-        .name = "Active Profile",
+        .object_id = "last_applied_profile",
+        .name = "Last Applied Profile",
         .category = NULL,
-        .state_topic = "active_profile",
+        .state_topic = "last_applied_profile",
         .availability_topic ="availability",
         .command_topic = NULL,
         .icon = "mdi:badge-account",
