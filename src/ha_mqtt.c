@@ -12,8 +12,10 @@ static void ha_on_connect(bool reconnect, void *user)
     (void)user;
 
     ha_publish_discovery(g_cfg);
+    ha_topic_subscribe_commands();
 
     status_set_availability(true);
+    status_set_custom_directory("");
     status_set_state("Online");
 }
 

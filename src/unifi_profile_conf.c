@@ -10,6 +10,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void unifi_profile_welcome_reset(unifi_profile_welcome_t *w) {
+    if (!w) return;
+    w->enabled = false;
+    w->file[0] = '\0';
+    w->count = 0;
+    w->duration_ms = 0;
+    w->loop = false;
+    w->gui_id[0] = '\0';
+}
+
+static void unifi_profile_ring_button_reset(unifi_profile_ring_button_t *r) {
+    if (!r) return;
+    r->enabled = false;
+    r->file[0] = '\0';
+    r->repeat_times = 1;   // your call; 1 is a sane default
+    r->volume = 100;       // same
+    r->sound_state_name[0] = '\0';
+}
+
 
 bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out) {
     if (!path || !out) {
@@ -27,14 +46,19 @@ bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", path, error_ptr);
+        free(file_buffer);
         return false;
     }
 
-    bool result = false;
+    free(file_buffer);
+    file_buffer = NULL;
+
+    unifi_profile_welcome_reset(&out->welcome);
+
+    bool result = true;
 
     cJSON *animations = cJSON_GetObjectItemCaseSensitive(root, "customAnimations");
     if (!cJSON_IsArray(animations)) {
@@ -107,14 +131,19 @@ bool unifi_profile_read_from_sounds_leds_conf(const char *path, unifi_profile_t 
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", path, error_ptr);
+        free(file_buffer);
         return false;
     }
 
-    bool result = false;
+    free(file_buffer);
+    file_buffer = NULL;
+
+    unifi_profile_ring_button_reset(&out->ring_button);
+
+    bool result = true;
 
     cJSON *sounds = cJSON_GetObjectItemCaseSensitive(root, "customSounds");
     if (!cJSON_IsArray(sounds)) {
@@ -195,12 +224,15 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", in_path, error_ptr ? error_ptr : "(unkown error)");
+        free(file_buffer);
         return false;
     }
+
+    free(file_buffer);
+    file_buffer = NULL;
 
     char *json = NULL;
     bool result = false;
@@ -307,12 +339,15 @@ bool unifi_profile_patch_sounds_leds_conf(const char *in_path, const char *out_p
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", in_path, error_ptr ? error_ptr : "(unkown error)");
+        free(file_buffer);
         return false;
     }
+
+    free(file_buffer);
+    file_buffer = NULL;
 
     char *json = NULL;
     bool result = false;

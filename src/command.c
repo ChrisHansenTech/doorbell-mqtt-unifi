@@ -38,12 +38,13 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         goto cleanup;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
@@ -59,7 +60,8 @@ cleanup:
         return;
     }
 
-    status_set_active_profile(payload);
+    status_set_last_applied_profile(payload);
+    status_set_preset_selected(payload);
     status_set_state("Idle");
 }
 
@@ -71,7 +73,7 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
 
     status_set_state("Uploading");
 
-    bool ok = true;
+    bool ok = false;
     ssh_session_t *session = NULL;
     char profile_path[PATH_MAX];
     unifi_profile_t profile;
@@ -92,12 +94,13 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         goto cleanup;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
@@ -113,7 +116,7 @@ cleanup:
         return;
     }
 
-    status_set_active_profile(payload);
+    status_set_last_applied_profile(payload);
     status_set_state("Idle");
 }
 
@@ -140,7 +143,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
   if (!session) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session.");
+    HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session.");
     return;
   }
 
@@ -161,7 +164,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   partial_download = false;
 
-  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     goto cleanup;
   }
@@ -172,7 +175,7 @@ cleanup:
   }
 
   if (partial_download) {
-    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
         HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     }
   }
@@ -201,12 +204,13 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         return;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
@@ -221,6 +225,6 @@ cleanup:
         status_set_state("Idle");
     }
 
-    status_set_active_profile("Test");
+    status_set_last_applied_profile("Test Config");
     status_set_state("Idle");
 }
