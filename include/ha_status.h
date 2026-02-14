@@ -29,9 +29,29 @@ void status_set_error(error_code_t code, const char *message_override);
 
 bool status_error_changed(error_code_t code, const char *message);
 
-void status_set_active_profile(const char *profile);
+/**
+ * @brief  Set the name of the last applied profile. This is used for informational purposes
+ *         and does not necessarily need to match the name of any actual profile on the device.
+ * 
+ * @param profile 
+ */
+void status_set_last_applied_profile(const char *profile);
 
+/**
+ * @brief Set the currently selected preset. This is used for informational purposes and does not 
+ *        necessarily need to match the name of any actual profile on the device.
+ * 
+ * @param preset 
+ */
+void status_set_preset_selected(const char *preset);
 
+/**
+ * @brief Set the custom profile directory. This is used for informational purposes and does not 
+ *        necessarily need to match any actual directory.
+ * 
+ * @param directory 
+ */
+void status_set_custom_directory(const char *directory);
 
 /**
  * @brief Set the availability status.
