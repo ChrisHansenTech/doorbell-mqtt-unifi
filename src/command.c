@@ -143,7 +143,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
   if (!session) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session.");
+    HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session.");
     return;
   }
 

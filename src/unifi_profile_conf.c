@@ -10,6 +10,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void unifi_profile_welcome_reset(unifi_profile_welcome_t *w) {
+    if (!w) return;
+    w->enabled = false;
+    w->file[0] = '\0';
+    w->count = 0;
+    w->duration_ms = 0;
+    w->loop = false;
+    w->gui_id[0] = '\0';
+}
+
+static void unifi_profile_ring_button_reset(unifi_profile_ring_button_t *r) {
+    if (!r) return;
+    r->enabled = false;
+    r->file[0] = '\0';
+    r->repeat_times = 1;   // your call; 1 is a sane default
+    r->volume = 100;       // same
+    r->sound_state_name[0] = '\0';
+}
+
 
 bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out) {
     if (!path || !out) {
@@ -37,7 +56,9 @@ bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out
     free(file_buffer);
     file_buffer = NULL;
 
-    bool result = false;
+    unifi_profile_welcome_reset(&out->welcome);
+
+    bool result = true;
 
     cJSON *animations = cJSON_GetObjectItemCaseSensitive(root, "customAnimations");
     if (!cJSON_IsArray(animations)) {
@@ -120,7 +141,9 @@ bool unifi_profile_read_from_sounds_leds_conf(const char *path, unifi_profile_t 
     free(file_buffer);
     file_buffer = NULL;
 
-    bool result = false;
+    unifi_profile_ring_button_reset(&out->ring_button);
+
+    bool result = true;
 
     cJSON *sounds = cJSON_GetObjectItemCaseSensitive(root, "customSounds");
     if (!cJSON_IsArray(sounds)) {
