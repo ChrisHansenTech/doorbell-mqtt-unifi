@@ -18,7 +18,8 @@ COPY src/ ./src/
 COPY include/ ./include/
 COPY Makefile ./
 
-RUN make clean && make
+ARG APP_VERSION=0.0.0-dev
+RUN make clean && make EXTRA_CFLAGS='-DAPP_VERSION="\"'"${APP_VERSION}"'\"" '
 
 # Final stage
 FROM debian:bookworm

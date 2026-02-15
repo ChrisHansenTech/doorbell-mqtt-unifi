@@ -36,5 +36,6 @@ jobs:
       - name: Build + test
         run: |
           make clean
-          make test CFLAGS='-DAPP_VERSION="\"'${VERSION}'\""' 
-          make release CFLAGS='-DAPP_VERSION="\"'${VERSION}'\""' 
+          make test EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
+          make release EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
+

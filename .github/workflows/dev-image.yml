@@ -49,7 +49,7 @@ jobs:
       - name: Run tests
         run: |
           make clean
-          make test CFLAGS='-DAPP_VERSION="\"'${VERSION}'\""' 
+          make test EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
