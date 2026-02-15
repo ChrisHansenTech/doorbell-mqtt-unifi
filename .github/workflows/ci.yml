@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: 
+      - "**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libssh2-1-dev \
+            libpaho-mqtt-dev
+
+      - name: Derive version (dev-ish)
+        run: |
+          SHORTSHA="$(git rev-parse --short HEAD)"
+          echo "VERSION=0.0.0-dev+${SHORTSHA}" >> $GITHUB_ENV
+
+      - name: Build + test
+        run: |
+          make clean
+          make test CFLAGS='-DAPP_VERSION="\"'${VERSION}'\""' 
+          make release CFLAGS='-DAPP_VERSION="\"'${VERSION}'\""' 
