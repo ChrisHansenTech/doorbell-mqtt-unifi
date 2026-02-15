@@ -25,6 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set image name
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+
       - name: Install dependencies (for tests)
         run: |
           sudo apt-get update
@@ -63,7 +68,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      
       - name: Build & push dev image
         uses: docker/build-push-action@v6
         with:
@@ -73,8 +78,8 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ github.repository }}:dev
-            ghcr.io/${{ github.repository }}:sha-${{ env.SHORTSHA }}
-            ghcr.io/${{ github.repository }}:test-${{ env.SHORTSHA }}
+            ghcr.io/${{ env.IMAGE }}:dev
+            ghcr.io/${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
+            ghcr.io/${{ env.IMAGE }}:test-${{ env.SHORTSHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -26,6 +26,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set image name
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+
       - name: Install dependencies (for tests)
         run: |
           sudo apt-get update
@@ -72,7 +77,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ env.VERSION }}
+            ghcr.io/${{ env.IMAGE }}:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -86,7 +91,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
