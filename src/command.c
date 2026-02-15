@@ -140,8 +140,11 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
   (void)payloadLen;
 
   bool partial_download = true;
+  time_t now = time(NULL);
+  char iso_timestamp[25];
   char local_path[PATH_MAX];
   char temp_path[PATH_MAX];
+  char final_dir[PATH_MAX];
   char final_path[PATH_MAX];
   unifi_profile_t profile;
 
@@ -174,7 +177,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   partial_download = false;
 
-  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
+  if (!profiles_repo_rename_temp_profile_dir(temp_path, &now, partial_download, final_dir, sizeof(final_dir), final_path, sizeof(final_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     goto cleanup;
   }
@@ -185,12 +188,14 @@ cleanup:
   }
 
   if (partial_download) {
-    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download, final_path, sizeof(final_path))) {
+    if (!profiles_repo_rename_temp_profile_dir(temp_path, &now, partial_download, final_dir, sizeof(final_dir),final_path, sizeof(final_path))) {
         HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     }
   }
 
-  status_set_status_message("download/last_path", final_path);
+  utils_build_iso_timestamp(&now, iso_timestamp, sizeof(iso_timestamp));
+
+  status_set_last_download(final_dir, final_path, iso_timestamp);
   status_set_state("Idle");
 }
 

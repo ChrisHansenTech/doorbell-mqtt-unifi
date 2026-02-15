@@ -64,6 +64,7 @@ void status_set_error(error_code_t code, const char *message_override) {
         LOG_ERROR("Failed to serialize last_error JSON.");
     }
 
+    cJSON_free(json);
     cJSON_Delete(root);
 }
 
@@ -106,6 +107,40 @@ void status_set_custom_directory(const char *directory) {
     ha_build_topic(buffer, sizeof(buffer), "custom/directory");
 
     mqtt_publish(buffer, directory, 1, 1);
+}
+
+void status_set_last_download(const char *directory, const char *path, const char *timestamp) {
+    if (!directory || !path || !timestamp) {
+        LOG_ERROR("Invalid parameters: directory=%p, path=%p, timestamp=%p", (void*)directory, (void*)path, (void*)timestamp);
+        return;
+    }
+
+    char state_topic[256];
+    ha_build_topic(state_topic, sizeof(state_topic), "last_download/time/state");
+    mqtt_publish(state_topic, timestamp, 1, 1);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        LOG_ERROR("Failed to allocate cJSON object for 'last_download/time/attributes'");
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "directory", directory);
+    cJSON_AddStringToObject(root, "full_path", path);
+
+    char *json = cJSON_PrintUnformatted(root);
+    
+    if (json) {
+        char json_topic[256];
+        ha_build_topic(json_topic, sizeof(json_topic), "last_download/time/attributes");
+        mqtt_publish(json_topic, json, 1, 1);
+
+        cJSON_free(json);
+    } else {
+        LOG_ERROR("Failed to serialize 'last_download/time/attributes' JSON.");
+    }
+
+    cJSON_Delete(root);
 }
 
 void status_set_availability(bool available) {

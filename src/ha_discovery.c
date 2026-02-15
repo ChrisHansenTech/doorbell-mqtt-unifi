@@ -97,6 +97,10 @@ static bool build_entity_payload(char *payload, size_t payload_size, const entit
 
     cJSON_AddStringToObject(root, "icon", d->icon);
 
+    if (d->device_class) {
+        cJSON_AddStringToObject(root, "device_class", d->device_class);
+    }
+
     if (d->value_template) {
         cJSON_AddStringToObject(root, "value_template", d->value_template);
     }

@@ -36,6 +36,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic = "availability",
         .command_topic = NULL,
         .icon = "mdi:information-outline",
+        .device_class = NULL,
         .add_options = NULL,
         .handle_command = NULL
     }, {
@@ -47,6 +48,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic = "availability",
         .command_topic = NULL,
         .icon = "mdi:alert-circle-outline",
+        .device_class = NULL,
         .value_template = "{{ value_json.message }}",
         .json_attributes_topic = "last_error",
         .json_attributes_template = NULL,
@@ -61,6 +63,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic ="availability",
         .command_topic = NULL,
         .icon = "mdi:badge-account",
+        .device_class = NULL,
         .add_options = NULL,
         .handle_command = NULL
     }, {
@@ -72,6 +75,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic ="availability",
         .command_topic = "cmd/preset_set",
         .icon = "mdi:tune-variant",
+        .device_class = NULL,
         .add_options = add_preset_options,
         .handle_command = command_set_preset
     }, {
@@ -83,6 +87,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic ="availability",
         .command_topic = "cmd/apply_custom",
         .icon = "mdi:folder",
+        .device_class = NULL,
         .add_options = NULL,
         .handle_command = command_apply_custom
     }, {
@@ -94,6 +99,7 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic = "availability",
         .command_topic = "cmd/test_config",
         .icon = "mdi:test-tube",
+        .device_class = NULL,
         .add_options = NULL,
         .handle_command = command_test_config
     }, {
@@ -105,17 +111,22 @@ const entity_t HA_ENTITIES[]  = {
         .availability_topic = "availability",
         .command_topic = "cmd/download_assets",
         .icon = "mdi:download",
+        .device_class = NULL,
         .add_options = NULL,
         .handle_command = command_download_assets
     }, {
         .component = "sensor",
-        .object_id = "last_download_path",
+        .object_id = "last_download",
         .name = "Last Asset Download",
         .category = "diagnostic",
-        .state_topic = "download/last_path",
+        .state_topic = "last_download/time/state",
         .availability_topic = "availability",
         .command_topic = NULL,
         .icon = "mdi:folder-arrow-down",
+        .device_class = "timestamp",
+        .value_template = NULL,
+        .json_attributes_topic = "last_download/time/attributes",
+        .json_attributes_template = NULL,
         .add_options = NULL,
         .handle_command = NULL
     }
