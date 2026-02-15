@@ -175,14 +175,20 @@ bool utils_create_directory(const char *path) {
     return false;
 }
 
-void utils_build_timestamp(char *out, size_t out_size) {
-    time_t now = time(NULL);
-
+void utils_build_timestamp_dir(time_t *t, char *out, size_t out_size) {
     struct tm tm_now;
 
-    localtime_r(&now, &tm_now);
+    gmtime_r(t, &tm_now);
 
     strftime(out, out_size, "%Y%m%d_%H%M%S", &tm_now);
+}
+
+void utils_build_iso_timestamp(time_t *t, char *out, size_t out_size) {
+    struct tm tm_now;
+
+    gmtime_r(t, &tm_now);
+
+    strftime(out, out_size, "%Y-%m-%dT%H:%M:%SZ", &tm_now);
 }
 
 void to_human_readable(const char *input, char *output, size_t out_size) {

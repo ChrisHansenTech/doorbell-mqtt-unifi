@@ -53,14 +53,17 @@ bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len);
  *        subdirectory to indicate an incomplete download. Otherwise, it will be moved to a "downloads" subdirectory. 
  *        The final path will be returned in out.
  * 
- * @param temp_dir 
+ * @param temp_dir
+ * @param time 
  * @param partial 
- * @param out 
- * @param out_len 
+ * @param out_dir
+ * @param out_dir_len
+ * @param out_path
+ * @param out_path_len
  * @return true 
  * @return false 
  */
-bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, char *out, size_t out_len);
+bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, time_t *time, bool partial, char *out_dir, size_t out_dir_len, char *out_path, size_t out_path_len);
 
 /**
  * @brief Write the last applied profile information to storage. This can be used to track which profile was last applied,

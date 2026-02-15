@@ -54,6 +54,17 @@ void status_set_preset_selected(const char *preset);
 void status_set_custom_directory(const char *directory);
 
 /**
+ * @brief Set the information about the last profile download, including the directory it was downloaded to, 
+ *        the final path, and a timestamp. This is used for informational purposes and does not necessarily 
+ *        need to match any actual directory or timestamp.
+ * 
+ * @param directory 
+ * @param path 
+ * @param timestamp 
+ */
+void status_set_last_download(const char *directory, const char *path, const char *timestamp);
+
+/**
  * @brief Set the availability status.
  * 
  * @param available true if available, false if not

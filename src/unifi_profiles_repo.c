@@ -149,7 +149,7 @@ bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len) {
     return true;
 }
 
-bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, char *out, size_t out_len) {
+bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, time_t *time, bool partial, char *out_dir, size_t out_dir_len, char *out_path, size_t out_path_len) {
     if (!profiles_initialized()) {
         LOG_ERROR("Called before initializing profile repo");
         return false;
@@ -161,7 +161,9 @@ bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, c
     }
 
     char ts[32];
-    utils_build_timestamp(ts, sizeof(ts));
+    utils_build_timestamp_dir(time, ts, sizeof(ts));
+
+    snprintf(out_dir, out_dir_len, "%s", ts);
 
     char download_path[PATH_MAX];
     char final_path[PATH_MAX];
@@ -186,10 +188,10 @@ bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, c
         return false;
     }
 
-    int len = snprintf(out, out_len, "%s", final_path);
+    int len = snprintf(out_path, out_path_len, "%s", final_path);
 
     if ((size_t)len < strlen(final_path)) {
-        LOG_WARN("Out value of '%s' was truncated from '%s'", out, final_path);
+        LOG_WARN("Out value of '%s' was truncated from '%s'", out_path, final_path);
     }
     
     return true;

@@ -183,7 +183,7 @@ void mqtt_publish(const char *topic, const char *payload, int qos, int retained)
         return;
     }
     
-    LOG_INFO("Published -> %s", topic);
+    LOG_INFO("Published '%s' -> %s", payload, topic);
 }
 
 void mqtt_loop(int timeout_ms) {
