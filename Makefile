@@ -130,6 +130,7 @@ run: $(BINDIR)/$(TARGET)
 
 
 # ===== Tests =====
+test-bin: CFLAGS += $(OPT_DEBUG)
 test-bin: dirs $(TEST_BINS)
 	@true
 
