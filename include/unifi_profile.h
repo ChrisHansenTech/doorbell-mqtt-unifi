@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <time.h>
 
 typedef struct {
     bool enabled;
@@ -25,3 +26,8 @@ typedef struct {
     unifi_profile_ring_button_t ring_button;
 } unifi_profile_t;
 
+typedef struct {
+    char profile_name[256];
+    bool is_preset;
+    time_t appied_at;
+} unifi_last_applied_profile_t;

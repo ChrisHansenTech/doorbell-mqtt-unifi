@@ -62,6 +62,25 @@ bool profiles_repo_create_temp_profile_dir(char *out_dir, size_t out_len);
  */
 bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, bool partial, char *out, size_t out_len);
 
+/**
+ * @brief Write the last applied profile information to storage. This can be used to track which profile was last applied,
+ *        when, and whether it was a preset or custom profile.
+ * 
+ * @param profile 
+ * @param is_preset 
+ * @return true 
+ * @return false 
+ */
+bool profiles_write_last_applied(const char *name, bool is_preset);
+
+/**
+ * @brief Load the last applied profile information from storage.
+ * 
+ * @param out 
+ * @return true 
+ * @return false 
+ */
+bool profile_load_last_applied(unifi_last_applied_profile_t *out);
 
 /**
  * @brief Shutdown the profiles module and release global resources.
