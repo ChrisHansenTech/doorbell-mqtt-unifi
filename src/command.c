@@ -48,6 +48,10 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         goto cleanup;
     }
 
+    if (!profiles_write_last_applied(payload, true)) {
+        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    }
+
     ok = true;
 
 cleanup: 
@@ -62,6 +66,7 @@ cleanup:
 
     status_set_last_applied_profile(payload);
     status_set_preset_selected(payload);
+    status_set_custom_directory("");
     status_set_state("Idle");
 }
 
@@ -104,6 +109,10 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
         goto cleanup;
     }
 
+    if (!profiles_write_last_applied(payload, false)) {
+        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    }
+
     ok = true;
 
 cleanup: 
@@ -117,6 +126,7 @@ cleanup:
     }
 
     status_set_last_applied_profile(payload);
+    status_set_preset_selected("none");
     status_set_state("Idle");
 }
 
@@ -226,5 +236,6 @@ cleanup:
     }
 
     status_set_last_applied_profile("Test Config");
+    status_set_preset_selected("none");
     status_set_state("Idle");
 }
