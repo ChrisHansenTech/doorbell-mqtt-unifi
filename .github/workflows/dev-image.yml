@@ -80,6 +80,5 @@ jobs:
           tags: |
             ghcr.io/${{ env.IMAGE }}:dev
             ghcr.io/${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
-            ghcr.io/${{ env.IMAGE }}:test-${{ env.SHORTSHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
