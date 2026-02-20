@@ -204,7 +204,7 @@ bool profiles_write_last_applied(const char *name, bool is_preset) {
     }
 
     char state_path[PATH_MAX];
-    if (!utils_build_path(state_path, sizeof(state_path), g_profiles_dir, "/.state/")) {
+    if (!utils_build_path(state_path, sizeof(state_path), g_profiles_dir, ".state/")) {
         LOG_ERROR("Failed to create path for profile '%s/.state/'", g_profiles_dir);
         return false;
     }

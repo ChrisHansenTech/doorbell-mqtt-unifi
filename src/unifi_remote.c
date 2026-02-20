@@ -210,28 +210,30 @@ int unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_d
         goto cleanup;
     }
 
+    // Always update the ubnt_lcm_gui.conf to remove the image if it is not enabled
+    char lcm_in[PATH_MAX];
+    char lcm_out[PATH_MAX];
+    
+    if (!utils_build_path(lcm_in, sizeof(lcm_in), temp_dir, "ubnt_lcm_gui.conf")) {
+        LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf");
+        result = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto cleanup;
+    }
+    
+    if (!utils_build_path(lcm_out, sizeof(lcm_out), temp_dir, "ubnt_lcm_gui.conf.patched")) {
+        LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf.patched");
+        result = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto cleanup;
+    }
+    
+    if (!unifi_profile_patch_lcm_gui_conf(lcm_in, lcm_out, profile)) {
+        LOG_ERROR("Failed to patch ubnt_lcm_gui.conf");
+        result = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto cleanup;
+    }
+    
+    // Only upload the image and md5 file if enabled
     if (profile->welcome.enabled) {
-
-        char lcm_in[PATH_MAX];
-        char lcm_out[PATH_MAX];
-
-        if (!utils_build_path(lcm_in, sizeof(lcm_in), temp_dir, "ubnt_lcm_gui.conf")) {
-            LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf");
-            result = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto cleanup;
-        }
-
-        if (!utils_build_path(lcm_out, sizeof(lcm_out), temp_dir, "ubnt_lcm_gui.conf.patched")) {
-            LOG_ERROR("Failed to build path for ubnt_lcm_gui.conf.patched");
-            result = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto cleanup;
-        }
-
-        if (!unifi_profile_patch_lcm_gui_conf(lcm_in, lcm_out, profile)) {
-            LOG_ERROR("Failed to patch ubnt_lcm_gui.conf");
-            result = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto cleanup;
-        }
         
         if (!utils_build_path(local_img_path, sizeof(local_img_path), profile_dir, profile->welcome.file)) {
             LOG_ERROR("Error building path for image '%s'", profile->welcome.file);
@@ -275,10 +277,11 @@ int unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_d
             goto cleanup;
         }
 
-        if (!ssh_scp_upload_file(session, lcm_out, remote_temp_path, 0644)) {
-            result = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
-            goto cleanup;
-        }
+    }
+    
+    if (!ssh_scp_upload_file(session, lcm_out, remote_temp_path, 0644)) {
+        result = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
+        goto cleanup;
     }
 
     if (profile->ring_button.enabled) {

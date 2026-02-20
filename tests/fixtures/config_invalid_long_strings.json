@@ -1,0 +1,37 @@
+{
+  "mqtt": {
+    "host": "192.168.1.x",
+    "port": 1883,
+    "username": "this is my really long username that should get truncated by the validation logic in the config loader for detecting invalid long strings",
+    "password": "",
+    "qos": 1,
+    "keepalive": 30,
+    "clean_session": 1,
+    "retained_online": 1,
+    "tls_enabled": 0,
+    "cafile": "",
+    "certfile": "",
+    "keyfile": "",
+    "keypass": ""
+  },
+  "ssh": {
+    "host": "192.168.1.x",
+    "port": 22,
+    "username": "ubnt",
+    "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
+  },
+  "presets": [
+    { 
+        "name": "Christmas",
+        "directory": "christmas"
+    },
+    {
+        "name": "New Years",
+        "directory": "new_years"
+    },
+    {
+        "name": "St. Patrick's Day",
+        "directory": "st_pats"
+    }
+  ]
+}

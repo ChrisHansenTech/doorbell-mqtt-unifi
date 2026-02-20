@@ -1,3 +1,9 @@
+# Doorbell MQTT UniFi
+
+![CI](https://github.com/ChrisHansenTech/doorbell-mqtt-unifi/actions/workflows/ci.yml/badge.svg?branch=dev)
+![Release](https://github.com/ChrisHansenTech/doorbell-mqtt-unifi/actions/workflows/release.yml/badge.svg)
+![Version](https://img.shields.io/github/v/release/ChrisHansenTech/doorbell-mqtt-unifi)
+![License](https://img.shields.io/github/license/ChrisHansenTech/doorbell-mqtt-unifi)
 
 **Doorbell MQTT UniFi** is a lightweight C-based service that bridges  
 **UniFi Protect G4 Doorbell Pro** devices with **MQTT** and **Home Assistant**.

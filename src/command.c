@@ -19,7 +19,7 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         return;
     }
 
-    status_set_state("Uploading");
+    status_set_state("uploading");
 
     bool ok = false;
     ssh_session_t *session = NULL;
@@ -60,14 +60,14 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
         return;
     }
 
     status_set_last_applied_profile(payload);
     status_set_preset_selected(payload);
     status_set_custom_directory("");
-    status_set_state("Idle");
+    status_set_state("idle");
 }
 
 void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
@@ -76,7 +76,7 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
         return;
     }
 
-    status_set_state("Uploading");
+    status_set_state("uploading");
 
     bool ok = false;
     ssh_session_t *session = NULL;
@@ -121,13 +121,13 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
         return;
     }
 
     status_set_last_applied_profile(payload);
     status_set_preset_selected("none");
-    status_set_state("Idle");
+    status_set_state("idle");
 }
 
 void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
@@ -148,7 +148,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
   char final_path[PATH_MAX];
   unifi_profile_t profile;
 
-  status_set_state("Downloading");
+  status_set_state("downloading");
 
   if (!profiles_repo_create_temp_profile_dir(temp_path, sizeof(temp_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path");
@@ -196,7 +196,7 @@ cleanup:
   utils_build_iso_timestamp(&now, iso_timestamp, sizeof(iso_timestamp));
 
   status_set_last_download(final_dir, final_path, iso_timestamp);
-  status_set_state("Idle");
+  status_set_state("idle");
 }
 
 void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
@@ -206,6 +206,8 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
 
     (void)payload;
     (void)payloadLen;
+
+    status_set_state("uploading");
 
     bool ok = false;
     ssh_session_t *session = NULL;
@@ -237,10 +239,11 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
     }
 
     status_set_last_applied_profile("Test Config");
     status_set_preset_selected("none");
-    status_set_state("Idle");
+    status_set_custom_directory("");
+    status_set_state("idle");
 }

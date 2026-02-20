@@ -22,11 +22,23 @@ static void build_entity_name(char *out, size_t out_len, const char *name, const
     }
 }
 
-static void build_unique_id(char *out, size_t out_len, const char *prefix, const char* object_id, const char *instance) {
+static void build_unique_id(char *out, size_t out_len, const char *object_id, const char *instance) {
+    const char *slug = "doorbell_mqtt_unifi"; 
+
     if (strcmp(instance, "default") == 0) {
-        snprintf(out, out_len, "%s_doorbell_mqtt_%s", prefix, object_id);
+        snprintf(out, out_len, "%s_%s", slug, object_id);
     } else {
-        snprintf(out, out_len, "%s_doorbell_mqtt_%s_%s", prefix, instance, object_id);
+        snprintf(out, out_len, "%s_%s_%s", slug, instance, object_id);
+    }
+}
+
+static void build_default_entity_id(char *out, size_t out_len, const char *component, const char *object_id, const char *instance) {
+    const char *slug = "doorbell_mqtt_unifi";
+
+    if (strcmp(instance, "default") == 0) {
+        snprintf(out, out_len, "%s.%s_%s", component, slug, object_id);
+    } else {
+        snprintf(out, out_len, "%s.%s_%s_%s", component, slug, object_id, instance);
     }
 }
 
@@ -71,9 +83,14 @@ static bool build_entity_payload(char *payload, size_t payload_size, const entit
         cJSON_AddStringToObject(root, "entity_category", d->category);
     }
 
-    build_unique_id(buffer, sizeof(buffer), cfg->mqtt_cfg.prefix, d->object_id, cfg->mqtt_cfg.instance);
-    cJSON_AddStringToObject(root, "object_id", buffer);
+    cJSON_AddStringToObject(root, "object_id", d->object_id);
+
+    build_unique_id(buffer, sizeof(buffer), d->object_id, cfg->mqtt_cfg.instance);
+    
     cJSON_AddStringToObject(root, "unique_id", buffer);
+
+    build_default_entity_id(buffer, sizeof(buffer), d->component, d->object_id, cfg->mqtt_cfg.instance);
+    cJSON_AddStringToObject(root,"default_entity_id", buffer);
 
     ha_build_topic(buffer, sizeof(buffer), d->state_topic);
     cJSON_AddStringToObject(root, "state_topic", buffer);

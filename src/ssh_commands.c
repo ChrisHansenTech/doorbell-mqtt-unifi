@@ -82,6 +82,13 @@ bool build_apply_profile_command(
 
     cmd_append(out, out_sz, &len, "%s", SCRIPT_PREAMBLE);
 
+    if (!anim_file) {
+        cmd_append(out, out_sz, &len,
+            "run cleanup_anim rm -f \"$ANIM_DIR\"/*\n"
+            "run move_anim_conf mv -f '%s/ubnt_lcm_gui.conf.patched' \"$PERSIST_DIR/ubnt_lcm_gui.conf\"\n",
+            tmp_dir);
+    }
+
     if (anim_file) {
         cmd_append(out, out_sz, &len,
             "run cleanup_anim rm -f \"$ANIM_DIR\"/*\n"
