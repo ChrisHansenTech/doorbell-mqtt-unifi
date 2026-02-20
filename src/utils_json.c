@@ -84,6 +84,20 @@ bool json_get_int(cJSON *obj, const char *key, int *out) {
     return false;
 }
 
+bool json_get_double(cJSON *obj, const char *key, double *out) {
+    if (!obj || !key || !out) {
+        return false;
+    }
+
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (cJSON_IsNumber(value)) {
+        *out = value->valuedouble;
+        return true;
+    }
+
+    return false;
+}
+
 bool json_upsert_item_case_sensitive(cJSON *obj, const char *key, cJSON *new_item) {
     if (!obj || !cJSON_IsObject(obj) || !key || !new_item) {
         if (new_item) cJSON_Delete(new_item);

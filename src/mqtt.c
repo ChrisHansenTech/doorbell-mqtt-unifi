@@ -147,12 +147,12 @@ bool mqtt_init(const config_mqtt_t *cfg_mqtt_in) {
 
     MQTTClient_setCallbacks(client, NULL, conn_lost, msg_arrived, delivered);
 
-    rc = mqtt_connect_internal(false);
+    //rc = mqtt_connect_internal(false);
 
-    if (rc != MQTTCLIENT_SUCCESS) {
-        MQTTClient_destroy(&client);
-        return false;
-    }
+    //if (rc != MQTTCLIENT_SUCCESS) {
+    //    MQTTClient_destroy(&client);
+    //    return false;
+    //}
 
     return true;
 }
@@ -183,8 +183,20 @@ void mqtt_publish(const char *topic, const char *payload, int qos, int retained)
         return;
     }
     
-    LOG_INFO("Published -> %s", topic);
+    char buffer[60];
+
+    size_t payload_len = strlen(payload);
+    size_t max_preview = sizeof(buffer) - 4;
+
+    if (payload_len <= max_preview) {
+        snprintf(buffer, sizeof(buffer), "%s", payload);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.*s...", (int)max_preview, payload);
+    }
+
+    LOG_INFO("Published '%s' -> %s", buffer, topic);
 }
+
 
 void mqtt_loop(int timeout_ms) {
     static time_t last_attempt = 0;

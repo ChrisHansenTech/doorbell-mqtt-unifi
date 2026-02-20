@@ -24,6 +24,7 @@ struct entity_t {
     const char *availability_topic;
     const char *command_topic;
     const char *icon;
+    const char *device_class;
     const char *value_template;
     const char *json_attributes_topic;
     const char *json_attributes_template;

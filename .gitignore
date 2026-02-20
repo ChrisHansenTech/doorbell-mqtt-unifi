@@ -3,6 +3,10 @@
 /build/
 /temp/
 /tmp/
+/profiles/.state/
+/profiles/downloads/
+/profiles/partial-downloads/
+/profiles/tmp/
 /*.o
 *.o
 *.d

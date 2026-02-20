@@ -22,8 +22,7 @@ typedef enum {
 } config_source_t;
 
 
-// TODO: Add checks for the length of the string to make sure it is truncating. If there is return and error so we can fail.
-static void cfg_set_str_from_env_json_default(
+static bool cfg_set_str_from_env_json_default(
     char *dst, size_t dst_size, 
     const cJSON *root, 
     const char *json_key, 
@@ -34,6 +33,8 @@ static void cfg_set_str_from_env_json_default(
 ) {
     const char *value = NULL;
     config_source_t source = SOURCE_NONE;
+
+    const char *name = label ? label : (json_key ? json_key : (env_name ? env_name : "(unnamed)"));
 
     if (env_name) {
         const char *env_val = getenv(env_name);
@@ -58,14 +59,17 @@ static void cfg_set_str_from_env_json_default(
     }
 
     if (value) {
-        snprintf(dst, dst_size, "%s", value);
+        int written = snprintf(dst, dst_size, "%s", value);
+
+        if (written < 0 || (size_t)written >= dst_size) {
+            LOG_ERROR("Configuration value for '%s' exceeds maximum length (%zu).",name, dst_size - 1);
+            return false;
+        }
     } else {
         if (dst_size > 0) {
             dst[0] = '\0';
         }
     }
-
-    const char *name = label ? label : (json_key ? json_key : (env_name ? env_name : "(unnamed)"));
 
     if (is_secret) {
         if (source == SOURCE_ENV) {
@@ -84,6 +88,22 @@ static void cfg_set_str_from_env_json_default(
             LOG_DEBUG("%s='%s' (from default).", name, value);
         }
     }
+
+    if (source == SOURCE_DEFAULT && dst && dst[0] != '\0') {
+
+        if (strcmp(name, "mqtt.host") == 0 && strcmp(dst, "localhost") == 0) {
+            LOG_WARN("%s not set; defaulting to '%s'. "
+                     "When running in Docker, '%s' refers to the container itself. "
+                     "Set MQTT_HOST or update /config/config.json and restart.", name, dst, dst);
+        }
+
+        if (strcmp(name, "ssh.host") == 0 && strcmp(dst, "localhost") == 0) {
+            LOG_WARN("ssh.host not set; defaulting to '%s'. "
+                     "Set SSH_HOST or update /config/config.json and restart.", dst);
+        }
+    }
+
+    return true;
 }
 
 static int cfg_get_int_from_env_json_default(const cJSON *root, const char *json_key, const char *env_name, int default_value) {
@@ -113,10 +133,12 @@ static bool preset_key_exists(const config_preset_item_t *items, size_t count, c
     return false;
 }
 
-static void config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
+static bool config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
     char host[40];
     
-    cfg_set_str_from_env_json_default(host, sizeof(host), root, "host", "MQTT_HOST", "localhost", "host", false);
+    if (!cfg_set_str_from_env_json_default(host, sizeof(host), root, "host", "MQTT_HOST", "localhost", "mqtt.host", false)) {
+        return false;
+    }
     
     mqtt_cfg->tls_enabled = cfg_get_int_from_env_json_default(root, "tls_enabled", "MQTT_TLS_ENABLED", 0);
 
@@ -127,28 +149,33 @@ static void config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
 
     snprintf(mqtt_cfg->address, sizeof(mqtt_cfg->address), "%s://%s:%d", proto, host, port);
     
-    cfg_set_str_from_env_json_default(mqtt_cfg->prefix, sizeof(mqtt_cfg->prefix), root, "prefix", "MQTT_PREFIX", "chrishansentech", "prefix", false);
-    cfg_set_str_from_env_json_default(mqtt_cfg->instance, sizeof(mqtt_cfg->instance), root, "instance", "MQTT_INSTANCE", "default", "instance", false);
+    if (!cfg_set_str_from_env_json_default(mqtt_cfg->prefix, sizeof(mqtt_cfg->prefix), root, "prefix", "MQTT_PREFIX", "chrishansentech", "mqtt.prefix", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->instance, sizeof(mqtt_cfg->instance), root, "instance", "MQTT_INSTANCE", "default", "mqtt.instance", false)) {
+        return false;
+    }
+
     to_human_readable(mqtt_cfg->instance, mqtt_cfg->instance_human, sizeof(mqtt_cfg->instance_human));
     
-
     char default_client_id[256];
     snprintf(default_client_id, sizeof(default_client_id), "%s-doorbell-mqtt-unifi-%s", mqtt_cfg->prefix, mqtt_cfg->instance);
 
-    cfg_set_str_from_env_json_default(mqtt_cfg->client_id, sizeof(mqtt_cfg->client_id), NULL, NULL, "MQTT_CLIENT_ID", default_client_id, "MQTT_CLIENT_ID", false);
-
-    cfg_set_str_from_env_json_default(mqtt_cfg->username, sizeof(mqtt_cfg->username), root, "username", "MQTT_USERNAME", "", "username", false);
-    cfg_set_str_from_env_json_default(mqtt_cfg->password, sizeof(mqtt_cfg->password), root, "password", "MQTT_PASSWORD", "", "password", true);
+    if (!cfg_set_str_from_env_json_default(mqtt_cfg->client_id, sizeof(mqtt_cfg->client_id), NULL, NULL, "MQTT_CLIENT_ID", default_client_id, "mqtt.client_id", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->username, sizeof(mqtt_cfg->username), root, "username", "MQTT_USERNAME", "", "mqtt.username", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->password, sizeof(mqtt_cfg->password), root, "password", "MQTT_PASSWORD", "", "mqtt.password", true)) {
+        return false;
+    }
 
     mqtt_cfg->qos = cfg_get_int_from_env_json_default(root, "qos", "MQTT_QOS", 1);
     mqtt_cfg->keepalive = cfg_get_int_from_env_json_default(root, "keepalive", "MQTT_KEEPALIVE", 30);
     mqtt_cfg->clean_session = cfg_get_int_from_env_json_default(root, "clean_session", "MQTT_CLEAN_SESSION", 1);
     mqtt_cfg->retained_online = cfg_get_int_from_env_json_default(root, "retained_online", "MQTT_RETAINED_ONLINE", 1);
 
-    cfg_set_str_from_env_json_default(mqtt_cfg->cafile, sizeof(mqtt_cfg->cafile), root, "cafile", "MQTT_CAFILE", "", "cafile", false);
-    cfg_set_str_from_env_json_default(mqtt_cfg->certfile, sizeof(mqtt_cfg->certfile), root, "certfile", "MQTT_CERT_FILE", "", "certfile", false);
-    cfg_set_str_from_env_json_default(mqtt_cfg->keyfile, sizeof(mqtt_cfg->keyfile), root, "keyfile", "MQTT_KEY_FILE", "", "keyfile", false);
-    cfg_set_str_from_env_json_default(mqtt_cfg->keypass, sizeof(mqtt_cfg->keypass), root, "keypass", "MQTT_KEYPASS", "", "keypass", true);
+    if (!cfg_set_str_from_env_json_default(mqtt_cfg->cafile, sizeof(mqtt_cfg->cafile), root, "cafile", "MQTT_CAFILE", "", "mqtt.cafile", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->certfile, sizeof(mqtt_cfg->certfile), root, "certfile", "MQTT_CERT_FILE", "", "mqtt.certfile", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->keyfile, sizeof(mqtt_cfg->keyfile), root, "keyfile", "MQTT_KEY_FILE", "", "mqtt.keyfile", false) ||
+        !cfg_set_str_from_env_json_default(mqtt_cfg->keypass, sizeof(mqtt_cfg->keypass), root, "keypass", "MQTT_KEYPASS", "", "mqtt.keypass", true)) {
+        return false;
+    }
 
     LOG_DEBUG("MQTT address: %s", mqtt_cfg->address);
     LOG_DEBUG("MQTT prefix: '%s', instance: '%s' (human: '%s')",
@@ -161,17 +188,21 @@ static void config_load_mqtt(config_mqtt_t *mqtt_cfg, const cJSON *root) {
               mqtt_cfg->keepalive,
               mqtt_cfg->clean_session,
               mqtt_cfg->retained_online);
+
+    
+    return true;
 }
 
-static void config_load_ssh(config_ssh_t *ssh_cfg, const cJSON *root) {
-    cfg_set_str_from_env_json_default(ssh_cfg->host, sizeof(ssh_cfg->host), root, "host", "SSH_HOST", "localhost", "host", false);
-    
+static bool config_load_ssh(config_ssh_t *ssh_cfg, const cJSON *root) {
+    if (!cfg_set_str_from_env_json_default(ssh_cfg->host, sizeof(ssh_cfg->host), root, "host", "SSH_HOST", "localhost", "ssh.host", false) ||
+        !cfg_set_str_from_env_json_default(ssh_cfg->user, sizeof(ssh_cfg->user), root, "username", "SSH_USERNAME", "ubnt", "ssh.username", false) ||
+        !cfg_set_str_from_env_json_default(ssh_cfg->password_env, sizeof(ssh_cfg->password_env), root, "password_env", NULL, "UNIFI_PROTECT_RECOVERY_CODE", "ssh.password_env", false)) {
+        return false;
+    }
+
     ssh_cfg->port = cfg_get_int_from_env_json_default(root, "port", "SSH_PORT", 22);
 
-    cfg_set_str_from_env_json_default(ssh_cfg->user, sizeof(ssh_cfg->user), root, "user", "SSH_USER", "ubnt", "user", false);
-
-    cfg_set_str_from_env_json_default(ssh_cfg->password_env, sizeof(ssh_cfg->password_env), root, "password_env", NULL, NULL, "UNIFI_PROTECT_RECOVERY_CODE", false);
-
+    return true;
 }
 
 static void config_load_presets(config_preset_t *preset_cfg, const cJSON *presets) {
@@ -270,39 +301,42 @@ bool config_load(const char *filename, config_t *cfg) {
         return false;
     }
 
+    free(json_buffer);
+    json_buffer = NULL;
+
     cJSON *mqtt = cJSON_GetObjectItem(root, "mqtt");
     if (!mqtt || !cJSON_IsObject(mqtt)) {
         LOG_ERROR("Missing or invalid 'mqtt' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
 
-    config_load_mqtt(&cfg->mqtt_cfg, mqtt);
+    if (!config_load_mqtt(&cfg->mqtt_cfg, mqtt)) {
+        return false;
+    }
 
 
     cJSON *ssh = cJSON_GetObjectItem(root, "ssh");
     if (!ssh || !cJSON_IsObject(ssh)) {
         LOG_ERROR("Missing or invalid 'ssh' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
     
-    config_load_ssh(&cfg->ssh_cfg, ssh);
+    if (!config_load_ssh(&cfg->ssh_cfg, ssh)) {
+        return false;
+    }
 
     cJSON *presets = cJSON_GetObjectItem(root, "presets");
     if (!presets || !cJSON_IsArray(presets)) {
         LOG_ERROR("Missing or invalid 'presets' section in '%s'", filename);
         cJSON_Delete(root);
-        free(json_buffer);
         return false;
     }
 
     config_load_presets(&cfg->preset_cfg, presets);
 
     cJSON_Delete(root);
-    free(json_buffer);
 
     LOG_INFO("Configuration loaded successfully from %s", filename);
     return true;

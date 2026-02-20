@@ -86,10 +86,12 @@ GENDEP := -MMD -MP
 
 # Build type toggles
 OPT_RELEASE := -O2 -DNDEBUG -D_POSIX_C_SOURCE=200809L
-OPT_DEBUG   := -O0 -g3 -DDEBUG -D_POSIX_C_SOURCE=200809L
+OPT_DEBUG := -O0 -g3 -fno-omit-frame-pointer -fno-inline -DDEBUG -D_POSIX_C_SOURCE=200809L
 
 # Default (release) unless BUILD=debug or target 'debug' is used
 CFLAGS  ?= $(CSTD) $(WARN) $(GENDEP) $(INCLUDES) $(PAHO_CFLAGS) $(SSH2_CFLAGS)
+# Allow CI/Docker to append flags without clobbering defaults
+CFLAGS  += $(EXTRA_CFLAGS)
 LDFLAGS ?=
 LDLIBS  ?= $(PAHO_LIBS) $(SSH2_LIBS) -lpthread
 
@@ -128,6 +130,7 @@ run: $(BINDIR)/$(TARGET)
 
 
 # ===== Tests =====
+test-bin: CFLAGS += $(OPT_DEBUG)
 test-bin: dirs $(TEST_BINS)
 	@true
 

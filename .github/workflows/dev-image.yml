@@ -1,0 +1,84 @@
+name: Dev Image
+
+on:
+  push:
+    branches: [ "dev" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string to embed (e.g. 0.0.0-test+abc1234)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: dev-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+
+      - name: Install dependencies (for tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libssh2-1-dev \
+            libpaho-mqtt-dev
+
+      - name: Derive version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            SHORTSHA="$(git rev-parse --short HEAD)"
+            VERSION="0.0.0-dev+${SHORTSHA}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "SHORTSHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: |
+          make clean
+          make test EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build & push dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_VERSION=${{ env.VERSION }}
+          tags: |
+            ghcr.io/${{ env.IMAGE }}:dev
+            ghcr.io/${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -19,7 +19,7 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         return;
     }
 
-    status_set_state("Uploading");
+    status_set_state("uploading");
 
     bool ok = false;
     ssh_session_t *session = NULL;
@@ -38,13 +38,18 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         goto cleanup;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
+    }
+
+    if (!profiles_write_last_applied(payload, true)) {
+        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
 
     ok = true;
@@ -55,12 +60,14 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
         return;
     }
 
-    status_set_active_profile(payload);
-    status_set_state("Idle");
+    status_set_last_applied_profile(payload);
+    status_set_preset_selected(payload);
+    status_set_custom_directory("");
+    status_set_state("idle");
 }
 
 void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
@@ -69,9 +76,9 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
         return;
     }
 
-    status_set_state("Uploading");
+    status_set_state("uploading");
 
-    bool ok = true;
+    bool ok = false;
     ssh_session_t *session = NULL;
     char profile_path[PATH_MAX];
     unifi_profile_t profile;
@@ -92,13 +99,18 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         goto cleanup;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
+    }
+
+    if (!profiles_write_last_applied(payload, false)) {
+        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
 
     ok = true;
@@ -109,12 +121,13 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
         return;
     }
 
-    status_set_active_profile(payload);
-    status_set_state("Idle");
+    status_set_last_applied_profile(payload);
+    status_set_preset_selected("none");
+    status_set_state("idle");
 }
 
 void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
@@ -127,12 +140,15 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
   (void)payloadLen;
 
   bool partial_download = true;
+  time_t now = time(NULL);
+  char iso_timestamp[25];
   char local_path[PATH_MAX];
   char temp_path[PATH_MAX];
+  char final_dir[PATH_MAX];
   char final_path[PATH_MAX];
   unifi_profile_t profile;
 
-  status_set_state("Downloading");
+  status_set_state("downloading");
 
   if (!profiles_repo_create_temp_profile_dir(temp_path, sizeof(temp_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path");
@@ -140,7 +156,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
   if (!session) {
-    HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session.");
+    HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session.");
     return;
   }
 
@@ -161,7 +177,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
 
   partial_download = false;
 
-  if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+  if (!profiles_repo_rename_temp_profile_dir(temp_path, &now, partial_download, final_dir, sizeof(final_dir), final_path, sizeof(final_path))) {
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     goto cleanup;
   }
@@ -172,13 +188,15 @@ cleanup:
   }
 
   if (partial_download) {
-    if (!profiles_repo_rename_temp_profile_dir(temp_path, partial_download)) {
+    if (!profiles_repo_rename_temp_profile_dir(temp_path, &now, partial_download, final_dir, sizeof(final_dir),final_path, sizeof(final_path))) {
         HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to rename download temp path");
     }
   }
 
-  status_set_status_message("download/last_path", final_path);
-  status_set_state("Idle");
+  utils_build_iso_timestamp(&now, iso_timestamp, sizeof(iso_timestamp));
+
+  status_set_last_download(final_dir, final_path, iso_timestamp);
+  status_set_state("idle");
 }
 
 void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
@@ -188,6 +206,8 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
 
     (void)payload;
     (void)payloadLen;
+
+    status_set_state("uploading");
 
     bool ok = false;
     ssh_session_t *session = NULL;
@@ -201,12 +221,13 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
 
     session = ssh_session_create(ctx->ssh_cfg);
     if (!session) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create SSH session");
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
         return;
     }
 
-    if (!unifi_profile_upload_and_apply(session, profile_path, &profile)) {
-        HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to upload and apply profile");
+    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
@@ -218,9 +239,11 @@ cleanup:
     }
 
     if (!ok) {
-        status_set_state("Idle");
+        status_set_state("idle");
     }
 
-    status_set_active_profile("Test");
-    status_set_state("Idle");
+    status_set_last_applied_profile("Test Config");
+    status_set_preset_selected("none");
+    status_set_custom_directory("");
+    status_set_state("idle");
 }

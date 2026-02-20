@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <time.h>
 
 /**
  * @brief Check if a file exists at the given path.
@@ -65,13 +66,22 @@ bool utils_write_file(const char *path, const char *content);
 bool utils_create_directory(const char *path);
 
 /**
- * @brief Build a timestamp string in the format "YYYYMMDD-HHMMSS".
+ * @brief Build a timestamp string in the format "YYYYMMDD_HHMMSS" for the current time or a given time.
  * 
- * @param out output buffer
- * @param out_size size of the output buffer
+ * @param t 
+ * @param out 
+ * @param out_size 
  */
-void utils_build_timestamp(char *out, size_t out_size);
+void utils_build_timestamp_dir(time_t *t, char *out, size_t out_size);
 
+/**
+ * @brief Build a timestamp string in ISO 8601 format (e.g. "2024-06-01T12:34:56Z") for the current time or a given time.
+ * 
+ * @param t 
+ * @param out 
+ * @param out_size 
+ */
+void utils_build_iso_timestamp(time_t *t, char *out, size_t out_size);
 
 /**
  * @brief Convert a string to human readable format.

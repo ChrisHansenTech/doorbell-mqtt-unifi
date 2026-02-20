@@ -23,3 +23,4 @@ bool unifi_profile_load_from_file(const char *path, unifi_profile_t *p);
  * @return false 
  */
 bool unifi_profile_write_to_file(const char *path, const unifi_profile_t *p);
+

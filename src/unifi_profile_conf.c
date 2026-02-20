@@ -10,6 +10,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void unifi_profile_welcome_reset(unifi_profile_welcome_t *w) {
+    if (!w) return;
+    w->enabled = false;
+    w->file[0] = '\0';
+    w->count = 0;
+    w->duration_ms = 0;
+    w->loop = false;
+    w->gui_id[0] = '\0';
+}
+
+static void unifi_profile_ring_button_reset(unifi_profile_ring_button_t *r) {
+    if (!r) return;
+    r->enabled = false;
+    r->file[0] = '\0';
+    r->repeat_times = 1;   // your call; 1 is a sane default
+    r->volume = 100;       // same
+    r->sound_state_name[0] = '\0';
+}
+
 
 bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out) {
     if (!path || !out) {
@@ -27,14 +46,19 @@ bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", path, error_ptr);
+        free(file_buffer);
         return false;
     }
 
-    bool result = false;
+    free(file_buffer);
+    file_buffer = NULL;
+
+    unifi_profile_welcome_reset(&out->welcome);
+
+    bool result = true;
 
     cJSON *animations = cJSON_GetObjectItemCaseSensitive(root, "customAnimations");
     if (!cJSON_IsArray(animations)) {
@@ -107,14 +131,19 @@ bool unifi_profile_read_from_sounds_leds_conf(const char *path, unifi_profile_t 
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", path, error_ptr);
+        free(file_buffer);
         return false;
     }
 
-    bool result = false;
+    free(file_buffer);
+    file_buffer = NULL;
+
+    unifi_profile_ring_button_reset(&out->ring_button);
+
+    bool result = true;
 
     cJSON *sounds = cJSON_GetObjectItemCaseSensitive(root, "customSounds");
     if (!cJSON_IsArray(sounds)) {
@@ -174,17 +203,6 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
         return false;
     }
 
-    if (!desired->welcome.enabled || desired->welcome.file[0] == '\0') {
-        LOG_DEBUG("Welcome disabled or no file set, copying config unchanged");
-
-        if (rename(in_path, out_path) != 0) {
-            LOG_ERROR("Failed to rename '%s' to '%s': %s", in_path, out_path, strerror(errno));
-            return false;
-        }   
-
-        return true;
-    }
-
     char *file_buffer = NULL;
 
     if (!utils_read_file(in_path, &file_buffer, NULL)) {
@@ -195,12 +213,15 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", in_path, error_ptr ? error_ptr : "(unkown error)");
+        free(file_buffer);
         return false;
     }
+
+    free(file_buffer);
+    file_buffer = NULL;
 
     char *json = NULL;
     bool result = false;
@@ -214,49 +235,68 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
         }
     }
 
-    cJSON *welcome = NULL;
-    cJSON *item = NULL;
+    if (desired->welcome.enabled && desired->welcome.file[0] != '\0') {
 
-    cJSON_ArrayForEach(item, animations) {
-        if (!cJSON_IsObject(item)) {
-            continue;
+        cJSON *welcome = NULL;
+        cJSON *item = NULL;
+
+        cJSON_ArrayForEach(item, animations) {
+            if (!cJSON_IsObject(item)) {
+                continue;
+            }
+
+            cJSON *gui_id = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+
+            if (cJSON_IsString(gui_id) && strcmp(gui_id->valuestring, "WELCOME") == 0) {
+                welcome = item;
+                break;
+            } 
         }
 
-        cJSON *gui_id = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+        if (!welcome) {
+            welcome = cJSON_CreateObject();
+            if (!welcome) goto cleanup;
+            cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
+            cJSON_AddItemToArray(animations, welcome);
+        }
 
-        if (cJSON_IsString(gui_id) && strcmp(gui_id->valuestring, "WELCOME") == 0) {
-            welcome = item;
-            break;
-        } 
+        if (!json_upsert_number_cs(welcome, "count", desired->welcome.count)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_number_cs(welcome, "durationMs", desired->welcome.duration_ms)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_bool_cs(welcome, "enable", desired->welcome.enabled)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_string_cs(welcome, "file", desired->welcome.file)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_bool_cs(welcome, "loop", desired->welcome.loop)) {
+            goto cleanup;
+        }
+    } else {
+        int count = cJSON_GetArraySize(animations);
+
+        for (int i = 0; i < count; i++) {
+             cJSON *item = cJSON_GetArrayItem(animations, i);
+        
+             if (!cJSON_IsObject(item)) continue;
+
+             cJSON *guiId = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+
+             if (cJSON_IsString(guiId) && strcmp(guiId->valuestring, "WELCOME") == 0) {
+                cJSON_DetachItemFromArray(animations, i);
+                break;
+             }
+        }
+
     }
 
-    if (!welcome) {
-        welcome = cJSON_CreateObject();
-        if (!welcome) goto cleanup;
-        cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
-        cJSON_AddItemToArray(animations, welcome);
-    }
-
-    if (!json_upsert_number_cs(welcome, "count", desired->welcome.count)) {
-        goto cleanup;
-    }
-
-    if (!json_upsert_number_cs(welcome, "durationMs", desired->welcome.duration_ms)) {
-        goto cleanup;
-    }
-    
-    if (!json_upsert_bool_cs(welcome, "enable", desired->welcome.enabled)) {
-        goto cleanup;
-    }
-    
-    if (!json_upsert_string_cs(welcome, "file", desired->welcome.file)) {
-        goto cleanup;
-    }
-
-    if (!json_upsert_bool_cs(welcome, "loop", desired->welcome.loop)) {
-        goto cleanup;
-    }
-    
     json = cJSON_Print(root);
 
     if (!json) {
@@ -307,12 +347,15 @@ bool unifi_profile_patch_sounds_leds_conf(const char *in_path, const char *out_p
     const char *error_ptr  = NULL;
 
     cJSON *root = cJSON_ParseWithOpts(file_buffer, &error_ptr, false);
-    free(file_buffer);
     
     if (!root) {
         LOG_ERROR("Error reading conf file '%s' at '%s'", in_path, error_ptr ? error_ptr : "(unkown error)");
+        free(file_buffer);
         return false;
     }
+
+    free(file_buffer);
+    file_buffer = NULL;
 
     char *json = NULL;
     bool result = false;
