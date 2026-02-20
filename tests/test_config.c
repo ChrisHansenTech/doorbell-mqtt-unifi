@@ -47,6 +47,12 @@ void test_config_does_not_load_presets_when_duplicates(void) {
     config_free(&cfg);
 }
 
+void test_config_fails_when_long_string_truncated(void) {
+    config_t cfg = {0};
+    TEST_ASSERT_FALSE(config_load("tests/fixtures/config_invalid_long_strings.json", &cfg));
+    config_free(&cfg);
+}
+
 int main(void) {
     UNITY_BEGIN();
     
@@ -56,6 +62,7 @@ int main(void) {
     RUN_TEST(test_config_loads_presets);
     RUN_TEST(test_config_does_not_load_presets_when_invalid_preset);
     RUN_TEST(test_config_does_not_load_presets_when_duplicates);
+    RUN_TEST(test_config_fails_when_long_string_truncated);
 
     return UNITY_END();
 }

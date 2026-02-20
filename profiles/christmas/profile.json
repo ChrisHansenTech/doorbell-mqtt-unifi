@@ -1,7 +1,7 @@
 {
     "schemaVersion": 1,
     "welcome": {
-        "enabled": true,
+        "enabled": false,
         "file": "christmas.png",
         "count": 57,
         "durationMs": 100,

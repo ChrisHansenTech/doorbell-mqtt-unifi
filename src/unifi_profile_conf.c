@@ -203,17 +203,6 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
         return false;
     }
 
-    if (!desired->welcome.enabled || desired->welcome.file[0] == '\0') {
-        LOG_DEBUG("Welcome disabled or no file set, copying config unchanged");
-
-        if (rename(in_path, out_path) != 0) {
-            LOG_ERROR("Failed to rename '%s' to '%s': %s", in_path, out_path, strerror(errno));
-            return false;
-        }   
-
-        return true;
-    }
-
     char *file_buffer = NULL;
 
     if (!utils_read_file(in_path, &file_buffer, NULL)) {
@@ -246,49 +235,68 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
         }
     }
 
-    cJSON *welcome = NULL;
-    cJSON *item = NULL;
+    if (desired->welcome.enabled && desired->welcome.file[0] != '\0') {
 
-    cJSON_ArrayForEach(item, animations) {
-        if (!cJSON_IsObject(item)) {
-            continue;
+        cJSON *welcome = NULL;
+        cJSON *item = NULL;
+
+        cJSON_ArrayForEach(item, animations) {
+            if (!cJSON_IsObject(item)) {
+                continue;
+            }
+
+            cJSON *gui_id = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+
+            if (cJSON_IsString(gui_id) && strcmp(gui_id->valuestring, "WELCOME") == 0) {
+                welcome = item;
+                break;
+            } 
         }
 
-        cJSON *gui_id = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+        if (!welcome) {
+            welcome = cJSON_CreateObject();
+            if (!welcome) goto cleanup;
+            cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
+            cJSON_AddItemToArray(animations, welcome);
+        }
 
-        if (cJSON_IsString(gui_id) && strcmp(gui_id->valuestring, "WELCOME") == 0) {
-            welcome = item;
-            break;
-        } 
+        if (!json_upsert_number_cs(welcome, "count", desired->welcome.count)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_number_cs(welcome, "durationMs", desired->welcome.duration_ms)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_bool_cs(welcome, "enable", desired->welcome.enabled)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_string_cs(welcome, "file", desired->welcome.file)) {
+            goto cleanup;
+        }
+
+        if (!json_upsert_bool_cs(welcome, "loop", desired->welcome.loop)) {
+            goto cleanup;
+        }
+    } else {
+        int count = cJSON_GetArraySize(animations);
+
+        for (int i = 0; i < count; i++) {
+             cJSON *item = cJSON_GetArrayItem(animations, i);
+        
+             if (!cJSON_IsObject(item)) continue;
+
+             cJSON *guiId = cJSON_GetObjectItemCaseSensitive(item, "guiId");
+
+             if (cJSON_IsString(guiId) && strcmp(guiId->valuestring, "WELCOME") == 0) {
+                cJSON_DetachItemFromArray(animations, i);
+                break;
+             }
+        }
+
     }
 
-    if (!welcome) {
-        welcome = cJSON_CreateObject();
-        if (!welcome) goto cleanup;
-        cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
-        cJSON_AddItemToArray(animations, welcome);
-    }
-
-    if (!json_upsert_number_cs(welcome, "count", desired->welcome.count)) {
-        goto cleanup;
-    }
-
-    if (!json_upsert_number_cs(welcome, "durationMs", desired->welcome.duration_ms)) {
-        goto cleanup;
-    }
-    
-    if (!json_upsert_bool_cs(welcome, "enable", desired->welcome.enabled)) {
-        goto cleanup;
-    }
-    
-    if (!json_upsert_string_cs(welcome, "file", desired->welcome.file)) {
-        goto cleanup;
-    }
-
-    if (!json_upsert_bool_cs(welcome, "loop", desired->welcome.loop)) {
-        goto cleanup;
-    }
-    
     json = cJSON_Print(root);
 
     if (!json) {

@@ -32,7 +32,6 @@ static void ha_on_connect(bool reconnect, void *user)
     }
 
     status_set_availability(true);
-    status_set_state("Online");
 }
 
 static void ha_on_disconnect(void *user)

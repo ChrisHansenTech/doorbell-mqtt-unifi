@@ -58,8 +58,6 @@ void status_set_error(error_code_t code, const char *message_override) {
         char topic[256];
         ha_build_topic(topic, sizeof(topic), "last_error");
         mqtt_publish(topic, json, 1, 1);
-
-        cJSON_free(json);
     } else {
         LOG_ERROR("Failed to serialize last_error JSON.");
     }
@@ -148,7 +146,7 @@ void status_set_availability(bool available) {
     char buffer[255];
     ha_build_topic(buffer, sizeof(buffer), "availability");
 
-    mqtt_publish(buffer, available ? "online" : "offline", 1, 1);
+    mqtt_publish(buffer, available ? "online" : "fffline", 1, 1);
 
     return;
 }
