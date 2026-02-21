@@ -101,7 +101,7 @@ bool unifi_profile_read_from_lcm_gui_conf(const char *path, unifi_profile_t *out
         }
 
         bool enabled = false;
-        if (json_get_bool(item, "enabled", &enabled)) {
+        if (json_get_bool(item, "enable", &enabled)) {
             out->welcome.enabled = enabled;
         }
 

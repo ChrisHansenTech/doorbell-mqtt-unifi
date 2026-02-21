@@ -1,7 +1,5 @@
 #include "ssh_commands.h"
-#include "logger.h"
 
-#include <ctype.h>
 #include <linux/limits.h>
 #include <stdarg.h>
 #include <stddef.h>
