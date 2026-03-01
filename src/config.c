@@ -222,11 +222,6 @@ static bool config_load_unifi(config_unifi_t *unifi_cfg, const cJSON *unifi) {
         return true;
     }
 
-    if (strcasecmp(type, "auto") == 0) {
-        unifi_cfg->apply_method = UNIFI_APPLY_AUTO;
-        return true;
-    }
-
     return false;
 }
 
@@ -342,7 +337,7 @@ bool config_load(const char *filename, config_t *cfg) {
 
     cJSON *unifi = cJSON_GetObjectItem(root, "unifi");
 
-    if (!unifi) {
+    if (unifi) {
         if (!cJSON_IsObject(unifi)) {
             LOG_ERROR("'unifi' must be an object in '%s'", filename);
             cJSON_Delete(root);

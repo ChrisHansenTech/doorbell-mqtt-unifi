@@ -4,8 +4,7 @@
 
 typedef enum {
     UNIFI_APPLY_LEGACY = 0,
-    UNIFI_APPLY_IPC,
-    UNIFI_APPLY_AUTO
+    UNIFI_APPLY_IPC
 } unifi_apply_method_t;
 
 typedef struct {

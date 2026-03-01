@@ -36,3 +36,14 @@ bool unifi_profile_download_and_load(ssh_session_t *session, const char *tmp_dir
  * @return int 
  */
 int unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile);
+
+/**
+ * @brief Uploads the given profile to the device and applies it using the specified method. This includes uploading any custom animation or sound files.
+ * 
+ * @param session 
+ * @param profile_dir 
+ * @param profile 
+ * @param method 
+ * @return int 
+ */
+int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method);

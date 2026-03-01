@@ -4,7 +4,7 @@
         "enabled": false,
         "file": "christmas.png",
         "count": 57,
-        "durationMs": 100,
+        "durationMs": 3240,
         "loop": true,
         "guiId": "WELCOME"
     },

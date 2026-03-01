@@ -6,6 +6,7 @@
 typedef struct mqtt_router_ctx {
     const config_ssh_t *ssh_cfg;
     const config_preset_t *preset_cfg;
+    const config_unifi_t *unifi_cfg;
 } mqtt_router_ctx_t;
 
 typedef void (*mqtt_handler_fn)(const mqtt_router_ctx_t *ctx, const char *payload, size_t len);

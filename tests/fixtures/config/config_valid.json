@@ -1,6 +1,6 @@
 {
   "mqtt": {
-    "host": "",
+    "host": "192.168.1.x",
     "port": 1883,
     "username": "",
     "password": "",
@@ -15,7 +15,7 @@
     "keypass": ""
   },
   "ssh": {
-    "host": "",
+    "host": "192.168.1.x",
     "port": 22,
     "username": "ubnt",
     "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
@@ -35,10 +35,6 @@
     {
         "name": "St. Patrick's Day",
         "directory": "st_pats"
-    },
-    {
-        "name": "Birthday party",
-        "directory": "birthday"
     }
   ]
 }

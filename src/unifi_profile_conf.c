@@ -24,8 +24,8 @@ static void unifi_profile_ring_button_reset(unifi_profile_ring_button_t *r) {
     if (!r) return;
     r->enabled = false;
     r->file[0] = '\0';
-    r->repeat_times = 1;   // your call; 1 is a sane default
-    r->volume = 100;       // same
+    r->repeat_times = 1;   
+    r->volume = 100; 
     r->sound_state_name[0] = '\0';
 }
 
@@ -226,78 +226,19 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
     char *json = NULL;
     bool result = false;
 
-    cJSON *animations = cJSON_GetObjectItemCaseSensitive(root, "customAnimations");
-    if (!cJSON_IsArray(animations)) {
-        animations = cJSON_AddArrayToObject(root, "customAnimations");
-        if (!animations) {
-            LOG_ERROR("Failed to create customAnimations array");
-            goto cleanup;
-        }
+    cJSON *new_animations = unifi_profile_build_custom_animations_array(desired);
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "customAnimations");
+
+    if (!cJSON_AddItemToObject(root, "customAnimations", new_animations)) {
+        LOG_ERROR("Failed to create customAnimations array");
+        cJSON_Delete(new_animations);
+        goto cleanup;
     }
 
-    if (desired->welcome.enabled && desired->welcome.file[0] != '\0') {
+    new_animations = NULL;
 
-        cJSON *welcome = NULL;
-        cJSON *item = NULL;
-
-        cJSON_ArrayForEach(item, animations) {
-            if (!cJSON_IsObject(item)) {
-                continue;
-            }
-
-            cJSON *gui_id = cJSON_GetObjectItemCaseSensitive(item, "guiId");
-
-            if (cJSON_IsString(gui_id) && strcmp(gui_id->valuestring, "WELCOME") == 0) {
-                welcome = item;
-                break;
-            } 
-        }
-
-        if (!welcome) {
-            welcome = cJSON_CreateObject();
-            if (!welcome) goto cleanup;
-            cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
-            cJSON_AddItemToArray(animations, welcome);
-        }
-
-        if (!json_upsert_number_cs(welcome, "count", desired->welcome.count)) {
-            goto cleanup;
-        }
-
-        if (!json_upsert_number_cs(welcome, "durationMs", desired->welcome.duration_ms)) {
-            goto cleanup;
-        }
-
-        if (!json_upsert_bool_cs(welcome, "enable", desired->welcome.enabled)) {
-            goto cleanup;
-        }
-
-        if (!json_upsert_string_cs(welcome, "file", desired->welcome.file)) {
-            goto cleanup;
-        }
-
-        if (!json_upsert_bool_cs(welcome, "loop", desired->welcome.loop)) {
-            goto cleanup;
-        }
-    } else {
-        int count = cJSON_GetArraySize(animations);
-
-        for (int i = 0; i < count; i++) {
-             cJSON *item = cJSON_GetArrayItem(animations, i);
-        
-             if (!cJSON_IsObject(item)) continue;
-
-             cJSON *guiId = cJSON_GetObjectItemCaseSensitive(item, "guiId");
-
-             if (cJSON_IsString(guiId) && strcmp(guiId->valuestring, "WELCOME") == 0) {
-                cJSON_DetachItemFromArray(animations, i);
-                break;
-             }
-        }
-
-    }
-
-    json = cJSON_Print(root);
+    json = cJSON_PrintUnformatted(root);
 
     if (!json) {
         goto cleanup;
@@ -360,50 +301,19 @@ bool unifi_profile_patch_sounds_leds_conf(const char *in_path, const char *out_p
     char *json = NULL;
     bool result = false;
 
-    cJSON *sounds = cJSON_GetObjectItemCaseSensitive(root, "customSounds");
-    if (!cJSON_IsArray(sounds)) {
-        sounds = cJSON_AddArrayToObject(root, "customSounds");
-        if (!sounds) {
-            LOG_ERROR("Failed to create customSounds array");
-            goto cleanup;
-        }
+    cJSON *new_sounds = unifi_profile_build_custom_sounds_array(desired);
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "customSounds");
+
+    if (!cJSON_AddItemToObject(root, "customSounds", new_sounds)) {
+        LOG_ERROR("Failed to create customSounds array");
+        cJSON_Delete(new_sounds);
+        goto cleanup;
     }
 
-    cJSON *sound = NULL;
-    cJSON *item = NULL;
+    new_sounds = NULL;
 
-    cJSON_ArrayForEach(item, sounds) {
-        if (!cJSON_IsObject(item)) {
-            continue;
-        }
-
-        cJSON *state = cJSON_GetObjectItemCaseSensitive(item, "soundStateName");
-
-        if (cJSON_IsString(state) && strcmp(state->valuestring, "RING_BUTTON_PRESSED") == 0) {
-            sound = item;
-            break;
-        }
-    }
-
-    if (!sound) {
-        sound = cJSON_CreateObject();
-        if (!sound) {
-            goto cleanup;
-        }
-
-        cJSON_AddStringToObject(sound, "soundStateName", "RING_BUTTON_PRESSED");
-        cJSON_AddItemToArray(sounds, sound);
-    }
-
-    cJSON_ReplaceItemInObjectCaseSensitive(sound, "enable", cJSON_CreateBool(desired->ring_button.enabled));
-
-    cJSON_ReplaceItemInObjectCaseSensitive(sound, "file", cJSON_CreateString(desired->ring_button.file));
-
-    cJSON_ReplaceItemInObjectCaseSensitive(sound, "repeatTimes", cJSON_CreateNumber(desired->ring_button.repeat_times));
-
-    cJSON_ReplaceItemInObjectCaseSensitive(sound, "volume", cJSON_CreateNumber(desired->ring_button.volume));
-
-    json = cJSON_Print(root);
+    json = cJSON_PrintUnformatted(root);
 
     if (!json) {
         goto cleanup;
@@ -425,3 +335,61 @@ cleanup:
     return result;
 }
 
+cJSON *unifi_profile_build_custom_animations_array(const unifi_profile_t *profile) {
+    if (!profile) {
+        return NULL;
+    }
+
+    cJSON *custom_animations = cJSON_CreateArray();
+
+    if (!custom_animations) {
+        return NULL;
+    }
+
+    cJSON *welcome = cJSON_CreateObject();
+
+    if (!welcome) {
+        cJSON_Delete(custom_animations);
+        return NULL;
+    }
+    
+    cJSON_AddStringToObject(welcome, "guiId", "WELCOME");
+    cJSON_AddNumberToObject(welcome, "count", profile->welcome.count);
+    cJSON_AddNumberToObject(welcome, "durationMs", profile->welcome.duration_ms);
+    cJSON_AddBoolToObject(welcome, "enable", profile->welcome.enabled);
+    cJSON_AddStringToObject(welcome, "file", profile->welcome.file);
+    cJSON_AddBoolToObject(welcome, "loop", profile->welcome.loop);
+
+    cJSON_AddItemToArray(custom_animations, welcome);
+
+    return custom_animations;
+}
+
+cJSON *unifi_profile_build_custom_sounds_array(const unifi_profile_t *profile) {
+    if (!profile) {
+        return NULL;
+    }
+    
+    cJSON *custom_sounds = cJSON_CreateArray();
+
+    if (!custom_sounds) {
+        return NULL;
+    }
+
+    cJSON *ring_button = cJSON_CreateObject();
+
+    if (!ring_button) {
+        cJSON_Delete(custom_sounds);
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(ring_button, "soundStateName", "RING_BUTTON_PRESSED");
+    cJSON_AddBoolToObject(ring_button, "enable", profile->ring_button.enabled);
+    cJSON_AddStringToObject(ring_button, "file", profile->ring_button.file);
+    cJSON_AddNumberToObject(ring_button, "repeatTimes", profile->ring_button.repeat_times);
+    cJSON_AddNumberToObject(ring_button, "volume", profile->ring_button.volume);
+
+    cJSON_AddItemToArray(custom_sounds, ring_button);
+
+    return custom_sounds;    
+}

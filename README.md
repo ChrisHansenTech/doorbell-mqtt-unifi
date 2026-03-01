@@ -5,298 +5,151 @@
 ![Version](https://img.shields.io/github/v/release/ChrisHansenTech/doorbell-mqtt-unifi)
 ![License](https://img.shields.io/github/license/ChrisHansenTech/doorbell-mqtt-unifi)
 
-**Doorbell MQTT UniFi** is a lightweight C-based service that bridges  
+**Doorbell MQTT UniFi** is a lightweight, C-based service that bridges
 **UniFi Protect G4 Doorbell Pro** devices with **MQTT** and **Home Assistant**.
 
-It enables local-only control of custom animations, sounds, and profile assets via MQTT ― without cloud dependencies or manual SSH scripting.
+It enables fast, local-only control of custom animations, sounds, and profile assets — without cloud dependencies or manual SSH scripting.
 
-The service:
+Designed for reliability, speed, and clean Home Assistant integration.
 
-- Publishes Home Assistant MQTT discovery entities    
-- Manages secure SSH/SCP communication with the doorbell
-- Applies custom doorbell profiles (project-defined animation + sound bundles)
-- Exposes automation-friendly status and control topics
-- Runs cleanly inside Docker
+> **Release Channels**
+> - `:latest` → Stable release  
+> - `:dev` → Development/nightly build (may contain bugs)
 
-This project is designed for Home Assistant users who want deeper control over their UniFi doorbell.
+## Why Use It?
 
----
+- Apply animation & sound changes in under 2 seconds (IPC mode)
+- Native Home Assistant MQTT Discovery integration
+- Safe legacy compatibility for existing users
+- Clean multi-doorbell support (one container per device)
+- Docker-first deployment model
 
-## ⚠️ Audience & Safety Notes
+No polling. No background agent on the doorbell. No cloud round trips.
 
-This is **not an official UniFi tool**.
+## Apply Methods
 
-This project is intended for users who:
+The service supports two methods for applying animations and sounds.
 
-- Are comfortable with MQTT and Home Assistant    
-- Understand SSH access and device-level file modification
-- Are comfortable editing JSON configuration files
-- Accept the risks of modifying files on embedded devices
+### IPC (Recommended)
 
-The doorbell typically self-heals by re-syncing configuration from UniFi Protect after a reboot. However, misuse may temporarily remove custom sounds or animations.
+The IPC (Inter-process Communication) method:
 
-Use at your own risk.
+* Uploads IPC payloads for `customAnimations` and `customSounds`
+* Updates the doorbell’s in-memory configuration
+* Does **not** restart doorbell processes
 
----
+Typical update time: **< 2 seconds**
 
-## Features
+* New installations of **v0.2.0+ default to IPC**.
+* Some advanced features require IPC.
 
-- Home Assistant MQTT Discovery (auto-created entities)    
-- Preset profile application
-- Custom profile uploads
-- Doorbell profile download
-- MQTT availability + structured status reporting
-- Graceful shutdown (SIGINT / SIGTERM safe)
-- Docker-friendly logging (stdout/stderr)
-- Environment-variable overrides for container use
-- Unit-tested core components (Unity)
+### Legacy
 
----
-## Architecture Overview
+The legacy method:
 
-The service runs as an MQTT-driven worker. It maintains minimal persistent state to restore the last applied profile and republish correct Home Assistant entity states after restarts.
+1. Downloads existing `.conf` files
+2. Patches them
+3. Uploads updates
+4. Restarts relevant doorbell processes
 
-### Apply profile flow
+Typical update time: **~30 seconds**
 
-1. Home Assistant sends a command via MQTT
-2. The service:
-    - Validates profile assets
-    - Connects over SSH
-    - Uploads assets via SCP
-    - Applies the profile
-3. Status and results are published back to MQTT
-### Download active doorbell assets flow
+If upgrading from a version prior to v0.2.0 and the `unifi` section does not exist in `config.json`, the service defaults to `legacy` to preserve existing behavior.
 
-1. Home Assistant sends a download command via MQTT
-2. The service:
-    - Connects over SSH
-    - Downloads the currently active doorbell assets (including configuration `.conf` files, animation, and sound)
-    - Saves them into a local profile directory for inspection or reuse
-3. Status and results are published back to MQTT
+You can override the method at any time:
 
-Downloaded `.conf` files are saved for reference and troubleshooting and are not required when reapplying a profile.
+```
+UNIF_APPLY_METHOD=IPC
+```
 
-No polling. No cloud dependencies. No persistent background agent on the doorbell.
+## Multi‑Doorbell Support
 
----
+Each container represents **one doorbell**.
+
+To run multiple doorbells, deploy multiple containers with different instances:
+
+```
+MQTT_INSTANCE=front_door
+MQTT_INSTANCE=back_door
+```
+
+The instance value controls:
+
+- MQTT topic namespacing
+- MQTT client ID
+- Home Assistant discovery identifiers
+- Entity unique IDs
+
+### Human‑Readable Device Names
+
+The service automatically formats the instance name for display in Home Assistant:
+
+* Dashes (`-`) and underscores (`_`) become spaces
+* The first letter of each word is capitalized
+
+Example:
+
+```
+MQTT_INSTANCE=front_door
+```
+
+Displays as:
+
+```
+(Front Door)
+```
+
+⚠️ Changing `MQTT_INSTANCE` after initial setup will create a new device in Home Assistant because unique IDs are derived from it.
 
 ## Home Assistant Integration
 
 The service publishes MQTT discovery payloads so Home Assistant automatically creates entities for control and status.
 
-![Home Assistant entities](docs/images/ha-entities.png)
-
 Entities include:
 
-- Download Assets button
-- Last Applied Profile sensor
-- Custom Profile Directory input
 - Preset Profile selector
+- Custom Profile Directory input
+- Download Assets button
 - Test Config button
-- Last Asset Download timestamp sensor
+- Last Applied Profile sensor
 - Last Error sensor
-- Status sensor    
+- Status sensor
+- Last Asset Download timestamp sensor
 
-This makes automation straightforward inside Home Assistant.
+Automation is fully local via MQTT.
 
----
 ## Quick Start (Docker Recommended)
 
-On first startup, if `/config/config.json` does not exist, the container will generate a sample configuration file.
+On first startup, if `/config/config.json` does not exist, the container generates a sample configuration file.
 
-In Docker, `localhost` refers to the container itself. Set `MQTT_HOST` and `SSH_HOST` to your broker and doorbell IP addresses.
-
-The only required environment variable is:
+Required environment variable:
 
 - `UNIFI_PROTECT_RECOVERY_CODE`
 
-All other settings may be configured in `config.json` or overridden via environment variables.
-
-### Minimal docker run Example
+Minimal example:
 
 ```bash
 docker run -d \
   --name doorbell-mqtt-unifi \
   --restart unless-stopped \
   -e UNIFI_PROTECT_RECOVERY_CODE=your_recovery_code \
-  -v /path/to/doorbell-mqtt-unifi/config:/config \
-  -v /path/to/doorbell-mqtt-unifi/profiles:/profiles \
+  -v /path/to/config:/config \
+  -v /path/to/profiles:/profiles \
   ghcr.io/chrishansentech/doorbell-mqtt-unifi:latest
 ```
 
-After the container starts:
+Restart the container after modifying `config.json`.
 
-1. Edit `/path/to/doorbell-mqtt-unifi/config/config.json`
-2. Set your MQTT and SSH settings
-3. Restart the container
+## Profile Configuration Note
 
-Configuration is read on startup. Restart the container after modifying `config.json`.
-
-```bash
-docker restart doorbell-mqtt-unifi
-```
-
----
-
-### Optional: Environment Variable Overrides
-
-You may override any `config.json` value using uppercase `SECTION_KEY` environment variables.
+In `profile.json`, `welcome.durationMs` represents the **total animation duration**, not per-frame duration.
 
 Example:
 
-```text
--e MQTT_HOST=192.168.1.40 
--e MQTT_PORT=1883 
--e SSH_HOST=192.168.1.135
-```
+If `count = 57` and `durationMs = 1900`, the animation runs at approximately 30 FPS.
 
-Environment variables take precedence over `config.json`.
+Lower values increase animation speed.
 
----
-### Expected Directory Structure
-
-```text
-/path/to/doorbell-mqtt-unifi/ 
-├── config/ 
-│  	└── config.json 
-└── profiles/     
-	├── christmas/     
-	├── new_years/     
-	└── st_pats/
-```
-
-Profiles must follow the structure documented in `docs/profiles.md`.
-
----
-
-## Building from Source
-
-### Prerequisites
-
-- GCC or Clang
-- pkg-config
-- Eclipse Paho MQTT C client (`libpaho-mqtt3c`)
-- libssh2
-- OpenSSL headers
-    
-On Debian/Ubuntu:
-
-```bash
-sudo apt install build-essential pkg-config libpaho-mqtt-dev libssh2-1-dev libssl-dev
-```
-
-### Build
-
-```bash
-make          # optimized build
-make debug    # debug build (-O0 -g3)
-```
-
-### Run
-
-```bash
-./bin/doorbell-mqtt-unifi
-```
-
----
-
-## Configuration
-
-Configuration is loaded from `config.json`.
-
-Environment variables override JSON values when set (ideal for Docker deployments).
-
-Start from `config.example.json`.
-
-### Minimal Example
-
-```json
-{
-  "mqtt": {
-    "host": "localhost",
-    "port": 1883,
-    "prefix": "chrishansentech",
-    "instance": "default"
-  },
-  "ssh": {
-    "host": "192.168.1.135",
-    "port": 22,
-    "user": "ubnt",
-    "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
-  },
-  "presets": [
-    { "name": "Christmas", "directory": "christmas" },
-    { "name": "New Years", "directory": "new_years" },
-    { "name": "St. Patrick's Day", "directory": "st_pats" }
-  ]
-}
-```
-
----
-
-## Profiles
-
-Profiles live under:
-
-```
-profiles/<name>/
-```
-
-Each profile must include:
-
-- `profile.json`
-- One `.png` animation file
-- One `.ogg` sound file
-    
-### profile.json Example
-
-```json
-{
-  "schemaVersion": 1,
-  "welcome": {
-    "enabled": true,
-    "file": "christmas.png",
-    "count": 57,
-    "durationMs": 100,
-    "loop": true,
-    "guiId": "WELCOME"
-  },
-  "ringButton": {
-    "enabled": true,
-    "file": "christmas.ogg",
-    "repeatTimes": 1,
-    "volume": 100,
-    "soundStateName": "RING_BUTTON_PRESSED"
-  }
-}
-```
-
-When `enabled=false`, the service will either clear the animation (welcome) or leave the existing ring sound unchanged. See `docs/profiles.md` for detailed behavior.
-
----
-
-## Repository Structure
-
-```
-├── src/                 # Core service logic
-├── include/             # Public headers
-├── profiles/            # Presets + downloads
-├── tests/               # Unity-based unit tests
-├── build/               # Build artifacts
-├── bin/                 # Compiled binary
-├── config.example.json  # Configuration template
-├── Makefile
-└── Dockerfile
-```
-
----
-
-## Roadmap
-
-- Default profile fallback support and related Home Assistant controls
-- Partial-failure rollback safety
-- Support additional animation `guiId` values to allow changing additional animations on the doorbell.
----
 ## License
 
 MIT License — see `LICENSE`.
