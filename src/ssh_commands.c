@@ -57,17 +57,15 @@ bool ssh_cmd_rm_rf(char *out, size_t out_sz, const char *path) {
     return (size_t)snprintf(out, out_sz, CMD_RM_RF, path) < out_sz;
 }
 
+bool ssh_cmd_reset_dir(char *out, size_t out_sz, const char *path) {
+    return (size_t)snprintf(out, out_sz, CMD_RESET_DIR, path, path) < out_sz;
+}
+
 bool ssh_cmd_restart_lcm(char *out, size_t out_sz) {
     return (size_t)snprintf(out, out_sz, CMD_RESTART_LCM) < out_sz;
 }
 
-bool build_apply_profile_command(
-    char *out,
-    size_t out_sz,
-    const char *tmp_dir,
-    const char *anim_file,
-    const char *sound_file
-) {
+bool build_apply_profile_command(char *out, size_t out_sz, const char *tmp_dir) {
     if (!*out || !tmp_dir)
         return false;
 
@@ -80,34 +78,43 @@ bool build_apply_profile_command(
 
     cmd_append(out, out_sz, &len, "%s", SCRIPT_PREAMBLE);
 
-    if (!anim_file) {
-        cmd_append(out, out_sz, &len,
-            "run cleanup_anim rm -f \"$ANIM_DIR\"/*\n"
-            "run move_anim_conf mv -f '%s/ubnt_lcm_gui.conf.patched' \"$PERSIST_DIR/ubnt_lcm_gui.conf\"\n",
-            tmp_dir);
-    }
+    cmd_append(out, out_sz, &len,
+        "# Legacy apply: animations (0..N)\n"
+        "set -- \"%s/anim/\"*.png\n"
+        "if [ -e \"$1\" ]; then\n"
+        "  run cleanup_anim rm -f -- \"$ANIM_DIR\"/*\n"
+        "  for f in \"%s/anim/\"*.png; do\n"
+        "    base=$(basename -- \"$f\")\n"
+        "    run move_anim mv -f -- \"$f\" \"$ANIM_DIR/$base.anim\"\n"
+        "  done\n"
+        "  set -- \"%s/anim/\"*.md5\n"
+        "  if [ -e \"$1\" ]; then\n"
+        "    run move_anim_md5 mv -f -- \"%s/anim/\"*.md5 \"$ANIM_DIR/\"\n"
+        "  fi\n"
+        "else\n"
+        "  echo \"No animation assets; skipping\"\n"
+        "fi\n",
+        tmp_dir, tmp_dir, tmp_dir, tmp_dir
+    );
 
-    if (anim_file) {
-        cmd_append(out, out_sz, &len,
-            "run cleanup_anim rm -f \"$ANIM_DIR\"/*\n"
-            "run move_anim mv -f '%s/%s' \"$ANIM_DIR/%s.anim\"\n"
-            "run move_anim_md5 mv -f '%s/%s.md5' \"$ANIM_DIR/%s.md5\"\n"
-            "run move_anim_conf mv -f '%s/ubnt_lcm_gui.conf.patched' \"$PERSIST_DIR/ubnt_lcm_gui.conf\"\n",
-            tmp_dir, anim_file, anim_file,
-            tmp_dir, anim_file, anim_file, tmp_dir
-        );
-    }
+    cmd_append(out, out_sz, &len,
+        "# Legacy apply: sounds (0..N)\n"
+        "set -- \"%s/sound/\"*\n"
+        "if [ -e \"$1\" ]; then\n"
+        "  run cleanup_snd rm -f -- \"$SND_DIR\"/*\n"
+        "  run move_snd mv -f -- \"%s/sound/\"* \"$SND_DIR/\"\n"
+        "else\n"
+        "  echo \"No sound assets; skipping\"\n"
+        "fi\n",
+        tmp_dir, tmp_dir
+    );
 
-    if (sound_file) {
-        cmd_append(out, out_sz, &len,
-            "run cleanup_snd rm -f \"$SND_DIR\"/*\n"
-            "run move_snd mv -f '%s/%s' \"$SND_DIR/%s\"\n"
-            "run move_snd_md5 mv -f '%s/%s.md5' \"$SND_DIR/%s.md5\"\n"
-            "run move_snd_conf mv -f '%s/ubnt_sounds_leds.conf.patched' \"$PERSIST_DIR/ubnt_sounds_leds.conf\"\n",
-            tmp_dir, sound_file, sound_file,
-            tmp_dir, sound_file, sound_file, tmp_dir
-        );
-    }
+    cmd_append(out, out_sz, &len,
+        "# Legacy apply: move patched conf files (always)\n"
+        "run move_anim_conf mv -f -- \"%s/ubnt_lcm_gui.conf.patched\" \"$PERSIST_DIR/ubnt_lcm_gui.conf\"\n"
+        "run move_snd_conf  mv -f -- \"%s/ubnt_sounds_leds.conf.patched\" \"$PERSIST_DIR/ubnt_sounds_leds.conf\"\n",
+        tmp_dir, tmp_dir
+    );
 
     cmd_append(out, out_sz, &len, "%s", SCRIPT_RESTART);
 
@@ -138,6 +145,63 @@ bool ssh_parse_step_error(const char *stderr_text, ssh_step_error_t *out) {
     strcpy(out->step, step);
     out->rc = rc;
     out->has_error = true;
+
+    return true;
+}
+
+bool ssh_cmd_ipc_cli(char *out, size_t out_sz, const char *target, const char *payload_path) {
+    return (size_t)snprintf(out, out_sz, CMD_IPC_CLI, target, target, payload_path) < out_sz;
+}
+
+
+bool build_move_assets_ipc(char *out, size_t out_sz, const char *tmp_dir) {
+    if (!*out || !tmp_dir) {
+        return false;
+    }
+
+    if (!ssh_arg_is_safe_single_quoted(tmp_dir)) {
+        return false;
+    }
+
+    out[0] = '\0';
+    size_t len = 0;
+
+    cmd_append(out, out_sz, &len, "%s", SCRIPT_PREAMBLE);
+
+    cmd_append(out, out_sz, &len,
+        "# Only do animation work if there are any PNGs\n"
+        "set -- \"%s/anim/\"*.png\n"
+        "if [ -e \"$1\" ]; then\n"
+        "  run cleanup_anim rm -f -- \"$ANIM_DIR\"/*\n"
+        "\n"
+        "  for f in \"%s/anim/\"*.png; do\n"
+        "    base=$(basename -- \"$f\")\n"
+        "    run move_anim mv -f -- \"$f\" \"$ANIM_DIR/$base.anim\"\n"
+        "  done\n"
+        "\n"
+        "  # md5s optional\n"
+        "  set -- \"%s/anim/\"*.md5\n"
+        "  if [ -e \"$1\" ]; then\n"
+        "    run move_anim_md5 mv -f -- \"%s/anim/\"*.md5 \"$ANIM_DIR/\"\n"
+        "  fi\n"
+        "else\n"
+        "  echo \"No animation assets; skipping\"\n"
+        "fi\n",
+        tmp_dir, tmp_dir, tmp_dir, tmp_dir
+    );
+
+    cmd_append(out, out_sz, &len,
+        "# Only do sound work if there are any files\n"
+        "set -- \"%s/sound/\"*\n"
+        "if [ -e \"$1\" ]; then\n"
+        "  run cleanup_snd rm -f -- \"$SND_DIR\"/*\n"
+        "\n"
+        "  run move_snd mv -f -- \"%s/sound/\"* \"$SND_DIR/\"\n"
+        "else\n"
+        "  echo \"No sound assets; skipping\"\n"
+        "fi\n",
+        tmp_dir, tmp_dir
+    );
 
     return true;
 }

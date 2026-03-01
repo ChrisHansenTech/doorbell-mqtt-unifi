@@ -82,6 +82,7 @@ int main(void) {
     mqtt_router_ctx_t inbound_ctx;
     inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
     inbound_ctx.preset_cfg = &cfg.preset_cfg;
+    inbound_ctx.unifi_cfg = &cfg.unifi_cfg;
 
     if (!mqtt_router_start(&inbound_ctx)) {
         LOG_FATAL("MQTT inbound worker failed to start. Exiting.");

@@ -31,7 +31,7 @@ The filenames referenced in `profile.json` must exactly match the files present 
         "enabled": true,
         "file": "christmas.png",
         "count": 57,
-        "durationMs": 100,
+        "durationMs": 3240,
         "loop": true,
         "guiId": "WELCOME"
     },
@@ -82,12 +82,18 @@ Incorrect values may result in playback glitches.
 
 ## welcome.durationMs
 
-Frame duration in milliseconds.
+Total animation duration in milliseconds (not per-frame).
+
+The device distributes this time evenly across all frames.
 
 Example:
 
-- `100` = each frame displays for 100ms
-    
+- `3240` with 57 frames ≈ 17.6 FPS  
+- `1900` with 57 frames ≈ 30 FPS  
+
+To calculate a target frame rate:
+
+totalDurationMs = (frameCount ÷ targetFPS) × 1000
 
 Lower values increase animation speed.
 

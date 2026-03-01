@@ -42,7 +42,7 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
@@ -70,8 +70,7 @@ cleanup:
     status_set_state("idle");
 }
 
-void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
-                          size_t payloadLen) {
+void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
     if (ctx == NULL || payload == NULL || payloadLen == 0) {
         return;
     }
@@ -103,7 +102,7 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload,
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
@@ -130,8 +129,7 @@ cleanup:
     status_set_state("idle");
 }
 
-void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload,
-                             size_t payloadLen) {
+void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
   if (ctx == NULL || payload == NULL || payloadLen == 0) {
     return;
   }
@@ -225,10 +223,14 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         return;
     }
 
-    int rc = unifi_profile_upload_and_apply(session, profile_path, &profile);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
+    }
+
+    if (!profiles_write_last_applied(payload, true)) {
+        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
 
     ok = true;

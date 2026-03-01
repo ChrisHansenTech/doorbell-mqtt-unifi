@@ -205,6 +205,26 @@ static bool config_load_ssh(config_ssh_t *ssh_cfg, const cJSON *root) {
     return true;
 }
 
+static bool config_load_unifi(config_unifi_t *unifi_cfg, const cJSON *unifi) {
+    char type[30];
+
+    if (!cfg_set_str_from_env_json_default(type, sizeof(type), unifi, "apply_method", "UNIFI_APPLY_METHOD", "IPC", "unifi.apply_method", false)) {
+        return false;
+    }
+
+    if (strcasecmp(type, "legacy") == 0) {
+        unifi_cfg->apply_method = UNIFI_APPLY_LEGACY;
+        return true;
+    }
+
+    if (strcasecmp(type, "ipc") == 0) {
+        unifi_cfg->apply_method = UNIFI_APPLY_IPC;
+        return true;
+    }
+
+    return false;
+}
+
 static void config_load_presets(config_preset_t *preset_cfg, const cJSON *presets) {
     if(!preset_cfg || !presets) {
         return;
@@ -315,6 +335,30 @@ bool config_load(const char *filename, config_t *cfg) {
         return false;
     }
 
+    cJSON *unifi = cJSON_GetObjectItem(root, "unifi");
+
+    if (unifi) {
+        if (!cJSON_IsObject(unifi)) {
+            LOG_ERROR("'unifi' must be an object in '%s'", filename);
+            cJSON_Delete(root);
+            return false;
+        }
+    } else {
+        LOG_WARN("Missing 'unifi' section in '%s'. Defaulting to 'legacy' apply method", filename);
+        
+        unifi = cJSON_AddObjectToObject(root, "unifi");
+        if (!unifi) {
+            LOG_ERROR("Failed to create default 'unifi' object");
+            cJSON_Delete(root);
+            return false;
+        }
+
+        cJSON_AddStringToObject(unifi, "apply_method", "legacy");
+    }
+
+    if (!config_load_unifi(&cfg->unifi_cfg, unifi)) {
+        return false;
+    }
 
     cJSON *ssh = cJSON_GetObjectItem(root, "ssh");
     if (!ssh || !cJSON_IsObject(ssh)) {
