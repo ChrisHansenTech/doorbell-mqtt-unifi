@@ -1,4 +1,5 @@
 #include "command.h"
+#include "config_types.h"
 #include "errors.h"
 #include "ha_status.h"
 #include "mqtt_router_types.h"
@@ -7,12 +8,14 @@
 #include "unifi_profile_json.h"
 #include "unifi_profiles_repo.h"
 #include "unifi_remote.h"
+#include "unifi_sfx.h"
 #include "utils.h"
 #include <linux/limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
     if (ctx == NULL || payload == NULL || payloadLen == 0) {
@@ -247,5 +250,41 @@ cleanup:
     status_set_last_applied_profile("Test Config");
     status_set_preset_selected("none");
     status_set_custom_directory("");
+    status_set_state("idle");
+}
+
+void command_play_sfx_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    (void)payloadLen;
+
+    status_set_sfx_preset_selected(payload);
+    status_set_state("uploading");
+
+    ssh_session_t *session = NULL;
+    
+    const config_sfx_preset_item_t *sfx = unifi_sfx_resolve_sfx(payload, ctx->sfx_ctx);
+
+    if (!sfx) {
+        HA_ERRF(4401, "SFX preset '%s' was not found", payload);
+        return;
+    }
+
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
+        return;
+    }
+
+    int rc = unifi_sfx_upload_and_play(session, sfx, ctx->sfx_ctx->sounds_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to upload and play SFX");
+        goto cleanup;
+    }
+
+cleanup:
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    status_set_sfx_preset_selected("none");
     status_set_state("idle");
 }

@@ -9,10 +9,6 @@
 static options_result_t add_preset_options(cJSON *root, const config_t *cfg, const entity_t *def) {
     (void)def;
 
-    if (cfg->preset_cfg.count == 0) {
-        return OPTIONS_ERR_EMPTY_LIST;
-    }
-
     cJSON *presets = cJSON_AddArrayToObject(root, "options");
 
     if (!presets) {
@@ -25,6 +21,22 @@ static options_result_t add_preset_options(cJSON *root, const config_t *cfg, con
 
     return OPTIONS_OK;
 } 
+
+static options_result_t add_sfx_preset_options(cJSON *root, const config_t *cfg, const entity_t *def) {
+    (void)def;
+
+    cJSON *presets = cJSON_AddArrayToObject(root, "options");
+
+    if (!presets) {
+        return OPTIONS_ERR_UNKNOWN;
+    }
+
+    for(size_t i = 0; i < cfg->sfx_preset_cfg.count; i++) {
+        cJSON_AddItemToArray(presets, cJSON_CreateString(cfg->sfx_preset_cfg.items[i].name));
+    }
+
+    return OPTIONS_OK;
+}
 
 const entity_t HA_ENTITIES[]  = {
     {
@@ -129,7 +141,19 @@ const entity_t HA_ENTITIES[]  = {
         .json_attributes_template = NULL,
         .add_options = NULL,
         .handle_command = NULL
+    }, {
+        .component = "select",
+        .object_id = "sfxpreset",
+        .name = "SFX Presets",
+        .category = NULL,
+        .state_topic = "sfxpreset/selected",
+        .availability_topic ="availability",
+        .command_topic = "cmd/sfx_preset_play",
+        .icon = "mdi:bullhorn",
+        .device_class = NULL,
+        .add_options = add_sfx_preset_options,
+        .handle_command = command_play_sfx_preset
     }
 };
 
-const size_t HA_ENTITIES_COUNT = 8;
+const size_t HA_ENTITIES_COUNT = 9;

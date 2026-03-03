@@ -47,3 +47,14 @@ int unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_d
  * @return int 
  */
 int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method);
+
+/**
+ * @brief Uploads the given SFX file to the device and plays it at the specified volume.
+ * 
+ * @param session 
+ * @param sfx_file_path 
+ * @param sfx_name 
+ * @param volume 
+ * @return int 
+ */
+int unifi_sfx_upload_and_play(ssh_session_t *session, const config_sfx_preset_item_t *sfx, const char *sounds_dir);

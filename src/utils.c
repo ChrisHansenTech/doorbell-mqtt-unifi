@@ -273,6 +273,8 @@ bool utils_delete_directory(const char *path) {
     char child_path[PATH_MAX];
 
     while ((entry = readdir(dir)) != NULL) {
+        errno = 0;
+        
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -303,8 +305,6 @@ bool utils_delete_directory(const char *path) {
                 return false;
             }
         }
-
-        errno = 0;
     }
 
     if (errno != 0) {
@@ -319,6 +319,35 @@ bool utils_delete_directory(const char *path) {
         LOG_ERROR("Failed to remove directory '%s': %s", path, strerror(errno));
         return false;
     }
+
+    return true;
+}
+
+bool utils_is_valid_filename(const char *name) {
+    if (!name || name[0] == '\0') {
+        return false;
+    }
+
+    size_t len = strlen(name);
+
+    if (len > 255) {
+        
+    } 
+
+    if (name[0] == '.') return false;
+
+    // Reject traversal and path separators
+    if (strstr(name, "..")) return false;
+    if (strchr(name, '/')) return false;
+    if (strchr(name, '\\')) return false;
+
+    // Reject control chars / non-printables
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        if (!isprint(*p)) return false;
+    }
+
+    // Reject trailing space or dot
+    if (name[len - 1] == ' ' || name[len - 1] == '.') return false;
 
     return true;
 }

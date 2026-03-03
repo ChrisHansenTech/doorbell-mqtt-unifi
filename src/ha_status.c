@@ -99,6 +99,15 @@ void status_set_preset_selected(const char *preset) {
     mqtt_publish(buffer, preset, 1, 1);
 }
 
+void status_set_sfx_preset_selected(const char *preset) {
+    char buffer[255];
+
+    ha_build_topic(buffer, sizeof(buffer), "sfxpreset/selected");
+
+    mqtt_publish(buffer, preset, 1, 1);
+}
+
+
 void status_set_custom_directory(const char *directory) {
     char buffer[255];
 

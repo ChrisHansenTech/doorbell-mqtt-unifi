@@ -43,6 +43,6 @@ COPY test-profile/ /app/test-profile/
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-VOLUME ["/config", "/profiles"]
+VOLUME ["/config", "/profiles", "/sounds"]
 
 ENTRYPOINT ["/entrypoint.sh"]

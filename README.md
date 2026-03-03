@@ -118,6 +118,38 @@ Entities include:
 
 Automation is fully local via MQTT.
 
+## Ad-Hoc Sound Effects (SFX)
+
+In addition to profile-based ring sounds, the service supports ad-hoc sound effects (SFX).
+
+This allows Home Assistant users to trigger custom sounds on the doorbell at any time, 
+independently of UniFi Protect’s ring/visitor tone configuration.
+
+### Features
+
+- Uses the doorbell’s built-in `playSound.sh`
+- Supports `.ogg` and `.wav`
+- Global volume control (0–100)
+- Preset-based dropdown (no raw JSON required)
+- No Protect config changes
+- No service restart required
+- No doorbell process restart
+
+Playback typically begins in under 1 second.
+
+### How It Works
+
+1. Select an SFX preset in Home Assistant.
+2. The file is uploaded to:
+   `/tmp/doorbell-mqtt-unifi/sfx/<unique_filename>`
+3. The service executes:
+   `playSound.sh /tmp/doorbell-mqtt-unifi/sfx/<unique_filename> -v <volume>`
+4. The temporary file is removed after playback.
+5. Status is published via MQTT.
+
+SFX playback is mutex-protected to prevent concurrent executions.
+
+
 ## Quick Start (Docker Recommended)
 
 On first startup, if `/config/config.json` does not exist, the container generates a sample configuration file.

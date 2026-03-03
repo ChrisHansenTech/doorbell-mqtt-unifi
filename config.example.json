@@ -40,5 +40,10 @@
         "name": "Birthday party",
         "directory": "birthday"
     }
-  ]
+  ],
+  "sfx": {
+        "presets": [
+        ],
+        "defaultVolume": 100
+    }
 }

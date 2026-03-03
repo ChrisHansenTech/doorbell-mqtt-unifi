@@ -48,12 +48,16 @@ typedef struct {
 
 typedef struct {
     char *name;
+    char *key_name;
     char *file;
+    char *dir;
+    int volume;
 } config_sfx_preset_item_t;
 
 typedef struct {
     config_sfx_preset_item_t *items;
     size_t count;
+    int default_volume;
 } config_sfx_preset_t;
 
 typedef struct {

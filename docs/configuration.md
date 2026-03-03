@@ -350,6 +350,89 @@ Directory name for the preset’s asset bundle.
 
 Keep it filesystem-friendly (lowercase + underscores recommended).
 
+## SFX section
+
+The `sfx` section enables ad-hoc sound playback using the doorbell’s existing `playSound.sh`.
+
+Unlike profile-based ring sounds, SFX playback:
+
+- Does not modify Protect configuration
+- Does not require reboot or process restart
+- Is executed immediately via SSH
+
+### Example
+
+{
+  "sfx": {
+    "presets": [
+      {
+        "name": "Hello",
+        "file": "hello.ogg",
+        "volume": 100
+      },
+      {
+        "name": "Chime",
+        "file": "chime.wav"
+      }
+    ],
+    "defaultVolume": 75
+  }
+}
+
+### sfx.presets[]
+
+Defines named sound effects selectable from Home Assistant.
+
+#### name
+
+Required  
+Display name shown in Home Assistant.
+
+Must be unique (case-insensitive).
+
+#### file
+
+Required  
+Filename under the `/sounds` bind mount.
+
+Only files inside `/sounds` are allowed.
+
+Supported formats:
+
+- `.ogg`
+- `.wav`
+
+#### volume
+
+Optional  
+If defined and > 0, this value overrides `defaultVolume` for the preset.
+
+If missing or `0`, `defaultVolume` is used.
+
+## sfx.defaultVolume
+
+Range: `0–100`  
+Default: `100`
+
+Global fallback volume used when a preset does not specify its own volume.
+
+## Runtime Behavior
+
+When a preset is selected:
+
+1. The service validates the preset.
+2. The file path is resolved under `/sounds`.
+3. The file is uploaded to:
+
+   `/tmp/doorbell-mqtt-unifi/sfx/`
+
+4. The following command is executed:
+
+   `playSound.sh <file> -v <volume>`
+
+5. The temporary file is removed.
+
+
 ## Quick “what must I set?” checklist
 
 Most users only need:
