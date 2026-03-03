@@ -54,6 +54,12 @@
 
 #define CMD_IPC_CLI "ubnt_ipc_cli -T=%s -f=%s -M=%s -r=1 -F=- -z"
 
+#define CMD_PLAY_SFX \
+    "/usr/local/bin/playSound.sh '%s' -v %d; " \
+    "rc=$?; " \
+    "rm -f -- '%s'; " \
+    "exit $rc"
+
 
 typedef struct {
     bool has_error;     
@@ -78,3 +84,5 @@ bool ssh_parse_step_error(const char *stderr_text, ssh_step_error_t *out);
 bool ssh_cmd_ipc_cli(char *out, size_t out_sz, const char *target, const char *payload_path);
 
 bool build_move_assets_ipc(char *out, size_t out_sz, const char *tmp_dir);
+
+bool ssh_cmd_play_sfx(char *out, size_t out_sz, const char *sfx_file_path, int volume);

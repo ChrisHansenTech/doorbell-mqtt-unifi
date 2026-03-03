@@ -31,7 +31,7 @@ static int unifi_prepare_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
     
     if (!utils_create_directory("/tmp/doorbell-mqtt-unifi")) {
         LOG_ERROR("Failed to create /tmp/doorbell-mqtt-unifi directory");
-        return ERROR_PROFILE_UPLOAD_FAILED;
+        return ERROR_LOCAL_TEMP_DIR_CREATE_FAILED;
     }
     
     char template[] = "/tmp/doorbell-mqtt-unifi/upload-XXXXXX";
@@ -39,17 +39,17 @@ static int unifi_prepare_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
     
     if (!dir) {
         LOG_ERROR("Failed to create temp directory for '%s': %s", template, strerror(errno));
-        return ERROR_PROFILE_UPLOAD_FAILED;
+        return ERROR_LOCAL_TEMP_DIR_CREATE_FAILED;
     }
 
     snprintf(wd->local_temp_dir, sizeof(wd->local_temp_dir), "%s", dir);
     
     if (!ssh_cmd_reset_dir(ssh_cmd, sizeof(ssh_cmd), wd->remote_temp_path)) {
-        return ERROR_PROFILE_UPLOAD_FAILED;
+        return ERROR_SSH_COMMAND_FAILED;
     }
     
     if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
-        return ERROR_PROFILE_UPLOAD_FAILED;
+        return ERROR_SSH_COMMAND_FAILED;
     }
     
     return ERROR_NONE;
@@ -493,6 +493,59 @@ static int unifi_apply_method(ssh_session_t *session, const unifi_workdir_t *wd,
     }
 }
 
+static int unifi_stage_sfx(ssh_session_t *session, const char *sfx_file, const char *sound_dir, const unifi_workdir_t *wd) {
+    if (!session || !sfx_file || !sound_dir || !wd) {
+        return ERROR_SFX_FAILED;
+    }
+
+    int rc = ERROR_NONE;
+
+    char local_path[PATH_MAX];
+
+    if (!utils_build_path(local_path, sizeof(local_path), sound_dir, sfx_file)) {
+        LOG_ERROR("Failed to build path '%s/%s'", sound_dir, sfx_file);
+        rc = ERROR_SFX_UPLOAD_FAILED;
+        goto out;
+    }
+
+    if (!ssh_scp_upload_file(session, local_path, wd->remote_temp_path, 0644)) {
+        LOG_ERROR("Failed to upload '%s'", local_path);
+        rc = ERROR_SFX_UPLOAD_FAILED;
+    }
+
+out:
+    return rc;
+}
+
+static int unifi_play_sfx(ssh_session_t *session, const char *sfx_file, const int volume, const unifi_workdir_t *wd) {
+    if (!session || !sfx_file || !wd) {
+        return ERROR_SFX_PLAY_COMMAND_FAILED;
+    }
+
+    int rc = ERROR_NONE;
+    char sfx_path[PATH_MAX];
+    char ssh_cmd[8192];
+
+    if (!utils_build_path(sfx_path, sizeof(sfx_path), wd->remote_temp_path, sfx_file)) {
+        LOG_ERROR("Failed to build path '%s/lcm_ipc_msg.json'", wd->local_temp_dir);
+        rc = ERROR_SFX_PLAY_COMMAND_FAILED;
+        goto out;
+    }
+
+    if (!ssh_cmd_play_sfx(ssh_cmd, sizeof(ssh_cmd), sfx_path, volume)) {
+        rc = ERROR_SFX_PLAY_COMMAND_FAILED;
+        goto out;
+    }
+
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+        rc = ERROR_SFX_PLAY_COMMAND_FAILED;
+        goto out;
+    }
+
+out:
+    return rc;
+}
+
 bool unifi_profile_download_and_load(ssh_session_t *session, const char *tmp_dir, unifi_profile_t *out) {
     if (!session || !tmp_dir || !out) {
         LOG_ERROR("Invalid parameters session=%p, tmp_dir=%p, out=%p", (void*)session, (void*)tmp_dir , (void*)out);
@@ -605,6 +658,38 @@ int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profil
     }
 
     if ((rc = unifi_apply_method(session, &wd, method)) != ERROR_NONE) {
+        goto cleanup;
+    }
+
+cleanup:
+    if (!utils_delete_directory(wd.local_temp_dir)) {
+        LOG_WARN("Failed to delete '%s'", wd.local_temp_dir);
+    }
+
+    return rc;
+}
+
+int unifi_sfx_upload_and_play(ssh_session_t *session, const config_sfx_preset_item_t *sfx, const char *sounds_dir) {
+    if (!session || !sfx || !sounds_dir) {
+        LOG_ERROR("Invalid parameters session=%p, sfx=%p, sounds_dir=%p", (void*)session, (void*)sfx, (void*)sounds_dir);
+        return ERROR_CONFIG_INVALID;
+    }
+
+    int rc = ERROR_NONE;
+
+    unifi_workdir_t wd = {0};
+
+    wd.remote_temp_path = "/tmp/doorbell-mqtt-unifi/sfx";
+
+    if ((rc = unifi_prepare_workdirs(session, &wd)) != ERROR_NONE) {
+        goto cleanup;
+    }
+
+    if ((rc = unifi_stage_sfx(session, sfx->file, sounds_dir, &wd)) != ERROR_NONE) {
+        goto cleanup;
+    } 
+
+    if ((rc = unifi_play_sfx(session, sfx->file, sfx->volume,  &wd))) {
         goto cleanup;
     }
 

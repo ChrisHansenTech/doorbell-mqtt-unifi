@@ -15,7 +15,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-static const config_preset_t *g_profiles_cfg = NULL; 
+static const config_preset_t *g_profiles_cfg = NULL;
 static char *g_profiles_dir = NULL;
 
 static bool profiles_initialized(void) {
@@ -33,7 +33,7 @@ static const char *config_get_preset_directory(const char *preset_name) {
     return NULL;
 }
 
-bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
+bool profiles_repo_init(const char *base_dir, const config_preset_t *presets) {
     if(profiles_initialized()) {
         LOG_ERROR("profiles_init called more than once.");
         return false;
@@ -52,7 +52,7 @@ bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
         return false;
     }
 
-    g_profiles_cfg = cfg;
+    g_profiles_cfg = presets;
 
     LOG_INFO("Profile repository initialized with base directory '%s'.", g_profiles_dir);
     return true;

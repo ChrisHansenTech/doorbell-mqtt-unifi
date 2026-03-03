@@ -17,6 +17,7 @@
 
 #define DEFAULT_CONFIG_PATH   "/config/config.json"
 #define DEFAULT_PROFILES_DIR  "/profiles"
+#define DEFAULT_SOUNDS_DIR    "/sounds"
 
 static volatile int running = 1;
 static void handle_signal(int sig) {
@@ -40,6 +41,11 @@ int main(void) {
     const char *profiles_dir = getenv("PROFILES_DIR");
     if (!profiles_dir) {
         profiles_dir = DEFAULT_PROFILES_DIR;
+    }
+
+    const char *sounds_dir = getenv("SOUNDS_DIR");
+    if (!sounds_dir) {
+        sounds_dir = DEFAULT_PROFILES_DIR;
     }
 
     if (!utils_delete_directory("/tmp/doorbell-mqtt-unifi")) {
@@ -79,10 +85,15 @@ int main(void) {
 
     mqtt_initialized = true;
 
+    sfx_ctx_t sfx_ctx;
+    sfx_ctx.sfx_preset_cfg = &cfg.sfx_preset_cfg;
+    sfx_ctx.sounds_dir = sounds_dir;
+
     mqtt_router_ctx_t inbound_ctx;
     inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
     inbound_ctx.preset_cfg = &cfg.preset_cfg;
     inbound_ctx.unifi_cfg = &cfg.unifi_cfg;
+    inbound_ctx.sfx_ctx = &sfx_ctx;
 
     if (!mqtt_router_start(&inbound_ctx)) {
         LOG_FATAL("MQTT inbound worker failed to start. Exiting.");

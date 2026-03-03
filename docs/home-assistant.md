@@ -76,6 +76,22 @@ Downloaded profiles can be:
 2. Added to the `presets` list in `config.json`
 3. Applied like any other preset
 
+## SFX Preset (Select)
+
+Entity type: Select  
+Purpose: Play an ad-hoc sound effect on the doorbell
+
+This dropdown lists all SFX presets defined in the `sfx.presets` section of `config.json`.
+
+When a preset is selected:
+
+- The sound file is uploaded temporarily to the doorbell
+- `playSound.sh` is executed
+- The file is removed after playback
+- Status updates are published
+
+There is no button entity — selecting the preset immediately triggers playback.
+
 ## Test Config (Button)
 
 **Entity type:** Button  

@@ -46,7 +46,7 @@ jobs:
             VERSION="${{ inputs.version }}"
           else
             SHORTSHA="$(git rev-parse --short HEAD)"
-            VERSION="0.0.0-dev+${SHORTSHA}"
+            VERSION="0.2.0-dev+${SHORTSHA}"
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "SHORTSHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV

@@ -205,3 +205,7 @@ bool build_move_assets_ipc(char *out, size_t out_sz, const char *tmp_dir) {
 
     return true;
 }
+
+bool ssh_cmd_play_sfx(char *out, size_t out_sz, const char *sfx_file_path, int volume) {
+    return (size_t)snprintf(out, out_sz, CMD_PLAY_SFX, sfx_file_path, volume, sfx_file_path) < out_sz;
+}

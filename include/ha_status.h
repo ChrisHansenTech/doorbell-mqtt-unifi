@@ -46,6 +46,14 @@ void status_set_last_applied_profile(const char *profile);
 void status_set_preset_selected(const char *preset);
 
 /**
+ * @brief Set the currently selected SFX preset. This is used for informational purposes and does not 
+ *        necessarily need to match the name of any actual SFX preset on the device.
+ * 
+ * @param preset 
+ */
+void status_set_sfx_preset_selected(const char *preset);
+
+/**
  * @brief Set the custom profile directory. This is used for informational purposes and does not 
  *        necessarily need to match any actual directory.
  * 
