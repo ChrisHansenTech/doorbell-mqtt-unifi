@@ -147,7 +147,8 @@ static int unifi_create_asset_md5_file(const char *asset_file_path, const char *
     return ERROR_NONE;
 }
 
-static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_dir, const char *asset_filename, asset_type type, const unifi_workdir_t *wd) {
+static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_dir
+    , const char *asset_filename, utils_file_class_t cls, const unifi_workdir_t *wd) {
     if (!session || !profile_dir || !asset_filename || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
         return ERROR_PROFILE_INVALID;
     }
@@ -158,6 +159,11 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
     char md5_file_path[PATH_MAX];
     char remote_path[PATH_MAX];
     char ssh_cmd[8192];
+
+    if (!utils_is_valid_filename(asset_filename, cls)) {
+        rc = ERROR_PROFILE_ASSET_FILE_INVALID;
+        goto out;
+    }
 
     if (!utils_build_path(asset_file_path, sizeof(asset_file_path), profile_dir, asset_filename)) {
         LOG_ERROR("Error building path for asset '%s/%s'", profile_dir, asset_filename);
@@ -170,6 +176,11 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
         rc = ERROR_PROFILE_INVALID;
         goto out;
     }
+
+    if (!utils_is_valid_file(asset_file_path, cls)) {
+        rc = ERROR_PROFILE_ASSET_FILE_INVALID;
+        goto out;
+    }
     
     rc = unifi_create_asset_md5_file(asset_file_path, asset_filename, wd->local_temp_dir, md5_file_path, sizeof(md5_file_path));
 
@@ -178,7 +189,7 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
     }
 
 
-    if (!utils_build_path(remote_path, sizeof(remote_path), wd->remote_temp_path, type == ANIM ? "anim" : "sound")) {
+    if (!utils_build_path(remote_path, sizeof(remote_path), wd->remote_temp_path, cls == UTILS_FILE_CLASS_ANIMATION ? "anim" : "sound")) {
         rc = ERROR_PROFILE_UPLOAD_FAILED;
         goto out;
     }
@@ -216,14 +227,14 @@ static int unifi_stage_assets(ssh_session_t *session, const char *profile_dir, c
     int rc = ERROR_NONE;
     
     if (profile->welcome.enabled) {
-        rc = unifi_stage_single_asset(session, profile_dir, profile->welcome.file, ANIM, wd);
+        rc = unifi_stage_single_asset(session, profile_dir, profile->welcome.file, UTILS_FILE_CLASS_ANIMATION, wd);
         if (rc != ERROR_NONE) {
             goto out;
         }
     }
 
     if (profile->ring_button.enabled) {
-        rc = unifi_stage_single_asset(session, profile_dir, profile->ring_button.file, SND, wd);
+        rc = unifi_stage_single_asset(session, profile_dir, profile->ring_button.file, UTILS_FILE_CLASS_SOUND, wd);
         if (rc != ERROR_NONE) {
             goto out;
         }
@@ -273,33 +284,31 @@ static int legacy_stage_artifacts(ssh_session_t *session, const unifi_profile_t 
         goto out;
     }
 
-    if (profile->ring_button.enabled) {
+    
+    char sounds_in[PATH_MAX];
+    char sounds_out[PATH_MAX];
 
-        char sounds_in[PATH_MAX];
-        char sounds_out[PATH_MAX];
+    if (!utils_build_path(sounds_in, sizeof(sounds_in), wd->local_temp_dir, "ubnt_sounds_leds.conf")) {
+        LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!utils_build_path(sounds_in, sizeof(sounds_in), wd->local_temp_dir, "ubnt_sounds_leds.conf")) {
-            LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
+    if (!utils_build_path(sounds_out, sizeof(sounds_out), wd->local_temp_dir, "ubnt_sounds_leds.conf.patched")) {
+        LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf.patched");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!utils_build_path(sounds_out, sizeof(sounds_out), wd->local_temp_dir, "ubnt_sounds_leds.conf.patched")) {
-            LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf.patched");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
+    if (!unifi_profile_patch_sounds_leds_conf(sounds_in, sounds_out, profile)) {
+        LOG_ERROR("Failed to patch ubnt_sounds_leds.conf");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!unifi_profile_patch_sounds_leds_conf(sounds_in, sounds_out, profile)) {
-            LOG_ERROR("Failed to patch ubnt_sounds_leds.conf");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
-
-        if (!ssh_scp_upload_file(session, sounds_out, wd->remote_temp_path, 0644)) {
-            rc = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
-            goto out;
-        }
+    if (!ssh_scp_upload_file(session, sounds_out, wd->remote_temp_path, 0644)) {
+        rc = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
+        goto out;
     }
 
 out:
@@ -505,6 +514,11 @@ static int unifi_stage_sfx(ssh_session_t *session, const char *sfx_file, const c
     if (!utils_build_path(local_path, sizeof(local_path), sound_dir, sfx_file)) {
         LOG_ERROR("Failed to build path '%s/%s'", sound_dir, sfx_file);
         rc = ERROR_SFX_UPLOAD_FAILED;
+        goto out;
+    }
+
+    if (!utils_is_valid_file(local_path, UTILS_FILE_CLASS_SOUND)) {
+        rc = ERROR_SFX_FILE_INVALID;
         goto out;
     }
 

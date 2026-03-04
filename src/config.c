@@ -252,16 +252,21 @@ static void config_load_presets(config_preset_t *preset_cfg, const cJSON *preset
         const char *directory = json_get_string(item, "directory");
         
         if (!name || !directory) {
-            LOG_ERROR("Invalid preset entry at index %ld (missing name or directory).", i);
-            goto fail;
+            LOG_WARN("Invalid preset entry at index %ld (missing name or directory).", i);
+            continue;
+        }
+
+        if (!utils_is_valid_directory_name(directory)) {
+            LOG_WARN("Invalid preset directory name '%s' for preset '%s'", directory, name);
+            continue;
         }
         
         char *key_name = json_strdup_normalized(item, "name");
 
         if (preset_key_exists(items, out, key_name)) {
-            LOG_ERROR("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
+            LOG_WARN("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
             free(key_name);
-            goto fail;
+            continue;
         }
 
         char *display_name = strdup(name);
@@ -331,21 +336,26 @@ static void config_load_sfx_presets(config_sfx_preset_t *sfx_cfg, const cJSON *p
         const char *file = json_get_string(item, "file");
         
         int volume = 0;
-        if (!json_get_int(item, "volume", &volume) || volume == 0) {
+        if (!json_get_int(item, "volume", &volume) || volume <= 0 || volume > 100) {
             volume = sfx_cfg->default_volume;
         }
         
         if (!name || !file) {
-            LOG_ERROR("Invalid sfx preset entry at index %ld (missing name or file).", i);
-            goto fail;
+            LOG_WARN("Invalid sfx preset entry at index %ld (missing name or file).", i);
+            continue;
+        }
+
+        if (!utils_is_valid_filename(file, UTILS_FILE_CLASS_SOUND)) {
+            LOG_WARN("Invalid file '%s' in SFX preset '%s'", file, name);
+            continue;
         }
         
         char *key_name = json_strdup_normalized(item, "name");
 
         if (sfx_preset_key_exists(items, out, key_name)) {
-            LOG_ERROR("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
+            LOG_WARN("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
             free(key_name);
-            goto fail;
+            continue;
         }
 
         char *display_name = strdup(name);
