@@ -35,17 +35,18 @@ void test_config_loads_presets(void) {
     config_free(&cfg);
 }
 
-void test_config_does_not_load_presets_when_invalid_preset(void) {
+void test_config_skips_invalid_preset(void) {
     config_t cfg = {0};
     TEST_ASSERT_TRUE(config_load("tests/fixtures/config/config_invalid_presets.json", &cfg));
-    TEST_ASSERT_EQUAL_INT(0, cfg.preset_cfg.count);
+    TEST_ASSERT_EQUAL_INT(2, cfg.preset_cfg.count);
     config_free(&cfg);
 }
 
-void test_config_does_not_load_presets_when_duplicates(void) {
+void test_config_loads_first_entry_when_duplicates(void) {
     config_t cfg = {0};
     TEST_ASSERT_TRUE(config_load("tests/fixtures/config/config_duplicate_presets.json", &cfg));
-    TEST_ASSERT_EQUAL_INT(0, cfg.preset_cfg.count);
+    TEST_ASSERT_EQUAL_INT(2, cfg.preset_cfg.count);
+    TEST_ASSERT_EQUAL_STRING("Christmas", cfg.preset_cfg.items[0].display_name);
     config_free(&cfg);
 }
 
@@ -68,6 +69,15 @@ void test_config_default_unifi_apply_method_legacy_when_unifi_does_not_exits(voi
     config_free(&cfg);
 }
 
+void test_config_skips_sfx_invalid_filenames(void) {
+    config_t cfg = {0};
+    TEST_ASSERT_TRUE(config_load("tests/fixtures/config/config_invalid_presets.json", &cfg));
+    TEST_ASSERT_EQUAL_INT(cfg.sfx_preset_cfg.count, 2);
+    TEST_ASSERT_EQUAL_STRING("Hello", cfg.sfx_preset_cfg.items[0].name);
+    TEST_ASSERT_EQUAL_STRING("Goodbye", cfg.sfx_preset_cfg.items[1].name);
+    config_free(&cfg);
+}
+
 int main(void) {
     UNITY_BEGIN();
     
@@ -75,11 +85,12 @@ int main(void) {
     RUN_TEST(test_config_fails_on_missing_file);
     RUN_TEST(test_config_fails_on_invalid_json);
     RUN_TEST(test_config_loads_presets);
-    RUN_TEST(test_config_does_not_load_presets_when_invalid_preset);
-    RUN_TEST(test_config_does_not_load_presets_when_duplicates);
+    RUN_TEST(test_config_skips_invalid_preset);
+    RUN_TEST(test_config_loads_first_entry_when_duplicates);
     RUN_TEST(test_config_fails_when_long_string_truncated);
     RUN_TEST(test_config_fails_when_unifi_exists_but_not_an_object);
     RUN_TEST(test_config_default_unifi_apply_method_legacy_when_unifi_does_not_exits);
+    RUN_TEST(test_config_skips_sfx_invalid_filenames);
 
     return UNITY_END();
 }

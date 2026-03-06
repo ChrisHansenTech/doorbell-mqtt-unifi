@@ -48,7 +48,7 @@ static int unifi_prepare_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
         return ERROR_SSH_COMMAND_FAILED;
     }
     
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
         return ERROR_SSH_COMMAND_FAILED;
     }
     
@@ -115,6 +115,66 @@ static bool unifi_conf_download(ssh_session_t *session, const char *tmp_dir) {
     return true;
 }
 
+static int unifi_check_persistent_storage(ssh_session_t *session) {
+    if (!session) {
+        return ERROR_SSH_COMMAND_FAILED;
+    }
+
+    int rc = ERROR_NONE;
+    int exit_status = -1;
+    char *stdout_buf = NULL;
+    char *stderr_buf = NULL;
+    size_t stdout_len = 0;
+    size_t stderr_len = 0;
+    char ssh_cmd[8192];
+
+    if (!ssh_cmd_storage_guardrail(ssh_cmd, sizeof(ssh_cmd))) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    bool ok = ssh_exec_command(session, ssh_cmd, &exit_status, &stdout_buf, &stdout_len, &stderr_buf, &stderr_len);
+
+    if (!ok) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (stdout_buf && *stdout_buf) {
+        LOG_DEBUG("Storage guardrail output:\n%s", stdout_buf);
+    }
+
+
+    if (stderr_buf && *stderr_buf) {
+        LOG_ERROR("%s", stderr_buf);
+    }
+
+    switch (exit_status) {
+        case 0:
+            break;
+        case 10: {
+            LOG_WARN("Doorbell storage guardrail warning: persistent storage nearly full.");
+            break;
+        }
+        case 1: {
+            LOG_ERROR("Storage guardrail failed: insufficient persistent storage.");
+            rc = ERROR_REMOTE_DISK_FULL;
+            break;
+        }
+        default: {
+            LOG_ERROR("Unexpected storage guardrail exit status: %d", exit_status);
+            rc = ERROR_SSH_COMMAND_FAILED;
+            break;
+        }
+    }
+
+cleanup:
+    free(stderr_buf);
+    free(stdout_buf);
+
+    return rc;
+}
+
 static int unifi_create_asset_md5_file(const char *asset_file_path, const char *asset_filename, const char *temp_dir, char *out, size_t out_sz) {
     char md5_hex[33];
     char md5_file[PATH_MAX];
@@ -147,7 +207,8 @@ static int unifi_create_asset_md5_file(const char *asset_file_path, const char *
     return ERROR_NONE;
 }
 
-static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_dir, const char *asset_filename, asset_type type, const unifi_workdir_t *wd) {
+static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_dir
+    , const char *asset_filename, utils_file_class_t cls, const unifi_workdir_t *wd) {
     if (!session || !profile_dir || !asset_filename || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
         return ERROR_PROFILE_INVALID;
     }
@@ -158,6 +219,11 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
     char md5_file_path[PATH_MAX];
     char remote_path[PATH_MAX];
     char ssh_cmd[8192];
+
+    if (!utils_is_valid_filename(asset_filename, cls)) {
+        rc = ERROR_PROFILE_ASSET_FILE_INVALID;
+        goto out;
+    }
 
     if (!utils_build_path(asset_file_path, sizeof(asset_file_path), profile_dir, asset_filename)) {
         LOG_ERROR("Error building path for asset '%s/%s'", profile_dir, asset_filename);
@@ -170,6 +236,11 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
         rc = ERROR_PROFILE_INVALID;
         goto out;
     }
+
+    if (!utils_is_valid_file(asset_file_path, cls)) {
+        rc = ERROR_PROFILE_ASSET_FILE_INVALID;
+        goto out;
+    }
     
     rc = unifi_create_asset_md5_file(asset_file_path, asset_filename, wd->local_temp_dir, md5_file_path, sizeof(md5_file_path));
 
@@ -178,7 +249,7 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
     }
 
 
-    if (!utils_build_path(remote_path, sizeof(remote_path), wd->remote_temp_path, type == ANIM ? "anim" : "sound")) {
+    if (!utils_build_path(remote_path, sizeof(remote_path), wd->remote_temp_path, cls == UTILS_FILE_CLASS_ANIMATION ? "anim" : "sound")) {
         rc = ERROR_PROFILE_UPLOAD_FAILED;
         goto out;
     }
@@ -188,7 +259,7 @@ static int unifi_stage_single_asset(ssh_session_t *session, const char* profile_
         goto out;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd,NULL, NULL, NULL, NULL, NULL)) {
         rc = ERROR_PROFILE_UPLOAD_FAILED;
         goto out;
     }
@@ -216,14 +287,14 @@ static int unifi_stage_assets(ssh_session_t *session, const char *profile_dir, c
     int rc = ERROR_NONE;
     
     if (profile->welcome.enabled) {
-        rc = unifi_stage_single_asset(session, profile_dir, profile->welcome.file, ANIM, wd);
+        rc = unifi_stage_single_asset(session, profile_dir, profile->welcome.file, UTILS_FILE_CLASS_ANIMATION, wd);
         if (rc != ERROR_NONE) {
             goto out;
         }
     }
 
     if (profile->ring_button.enabled) {
-        rc = unifi_stage_single_asset(session, profile_dir, profile->ring_button.file, SND, wd);
+        rc = unifi_stage_single_asset(session, profile_dir, profile->ring_button.file, UTILS_FILE_CLASS_SOUND, wd);
         if (rc != ERROR_NONE) {
             goto out;
         }
@@ -273,33 +344,31 @@ static int legacy_stage_artifacts(ssh_session_t *session, const unifi_profile_t 
         goto out;
     }
 
-    if (profile->ring_button.enabled) {
+    
+    char sounds_in[PATH_MAX];
+    char sounds_out[PATH_MAX];
 
-        char sounds_in[PATH_MAX];
-        char sounds_out[PATH_MAX];
+    if (!utils_build_path(sounds_in, sizeof(sounds_in), wd->local_temp_dir, "ubnt_sounds_leds.conf")) {
+        LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!utils_build_path(sounds_in, sizeof(sounds_in), wd->local_temp_dir, "ubnt_sounds_leds.conf")) {
-            LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
+    if (!utils_build_path(sounds_out, sizeof(sounds_out), wd->local_temp_dir, "ubnt_sounds_leds.conf.patched")) {
+        LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf.patched");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!utils_build_path(sounds_out, sizeof(sounds_out), wd->local_temp_dir, "ubnt_sounds_leds.conf.patched")) {
-            LOG_ERROR("Failed to build path for ubnt_sounds_leds.conf.patched");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
+    if (!unifi_profile_patch_sounds_leds_conf(sounds_in, sounds_out, profile)) {
+        LOG_ERROR("Failed to patch ubnt_sounds_leds.conf");
+        rc = ERROR_PROFILE_DOWNLOAD_FAILED;
+        goto out;
+    }
 
-        if (!unifi_profile_patch_sounds_leds_conf(sounds_in, sounds_out, profile)) {
-            LOG_ERROR("Failed to patch ubnt_sounds_leds.conf");
-            rc = ERROR_PROFILE_DOWNLOAD_FAILED;
-            goto out;
-        }
-
-        if (!ssh_scp_upload_file(session, sounds_out, wd->remote_temp_path, 0644)) {
-            rc = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
-            goto out;
-        }
+    if (!ssh_scp_upload_file(session, sounds_out, wd->remote_temp_path, 0644)) {
+        rc = ERROR_PROFILE_UPLOAD_TRANSFER_FAILED;
+        goto out;
     }
 
 out:
@@ -384,7 +453,7 @@ static int legacy_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, &out, &out_len, &err, &err_len)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, &out, &out_len, &err, &err_len)) {
         ssh_step_error_t step_error;
         if (ssh_parse_step_error(err, &step_error)) {
             LOG_ERROR("Apply profiles failed at step '%s' with return code '%d'", step_error.step, step_error.rc);
@@ -426,7 +495,7 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
     
-    if (!ssh_exec_command(session, ssh_cmd, &out, &out_len, &err, &err_len)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, &out, &out_len, &err, &err_len)) {
         ssh_step_error_t step_error;
         if (ssh_parse_step_error(err, &step_error)) {
             LOG_ERROR("Move assets IPC failed at step '%s' with return code '%d'", step_error.step, step_error.rc);
@@ -447,7 +516,7 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
@@ -462,7 +531,7 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
@@ -508,6 +577,11 @@ static int unifi_stage_sfx(ssh_session_t *session, const char *sfx_file, const c
         goto out;
     }
 
+    if (!utils_is_valid_file(local_path, UTILS_FILE_CLASS_SOUND)) {
+        rc = ERROR_SFX_FILE_INVALID;
+        goto out;
+    }
+
     if (!ssh_scp_upload_file(session, local_path, wd->remote_temp_path, 0644)) {
         LOG_ERROR("Failed to upload '%s'", local_path);
         rc = ERROR_SFX_UPLOAD_FAILED;
@@ -537,7 +611,7 @@ static int unifi_play_sfx(ssh_session_t *session, const char *sfx_file, const in
         goto out;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
         rc = ERROR_SFX_PLAY_COMMAND_FAILED;
         goto out;
     }
@@ -650,6 +724,10 @@ int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profil
     }
 
     if ((rc = unifi_stage_assets(session, profile_dir, profile, &wd)) != ERROR_NONE) {
+        goto cleanup;
+    }
+
+    if ((rc = unifi_check_persistent_storage(session)) != ERROR_NONE) {
         goto cleanup;
     }
 

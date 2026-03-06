@@ -4,6 +4,11 @@
 #include <stddef.h>
 #include <time.h>
 
+typedef enum {
+    UTILS_FILE_CLASS_SOUND,
+    UTILS_FILE_CLASS_ANIMATION
+} utils_file_class_t;
+
 /**
  * @brief Check if a file exists at the given path.
  * 
@@ -66,7 +71,7 @@ bool utils_write_file(const char *path, const char *content);
 bool utils_create_directory(const char *path);
 
 /**
- * @brief Build a timestamp string in the format "YYYYMMDD_HHMMSS" for the current time or a given time.
+ * @brief Build a timestamp directory name in the format "YYYYMMDD_HHMMSS" for the current time or a given time.
  * 
  * @param t 
  * @param out 
@@ -112,3 +117,31 @@ bool utils_md5_file_hex(const char *path, char out_hex[33]);
  */
 bool utils_delete_directory(const char *path);
 
+/**
+ * @brief Check if a directory name is valid (single segment, no path traversal, reasonable length).
+ * 
+ * @param name directory name to check
+ * @return true if the directory name is valid
+ * @return false if the directory name is not valid
+ */
+bool utils_is_valid_directory_name(const char *name);
+
+/**
+ * @brief Check if a filename is valid for the given file class.
+ * 
+ * @param name filename to check
+ * @param cls file class to check against
+ * @return true if the filename is valid for the file class
+ * @return false if the filename is not valid for the file class
+ */
+bool utils_is_valid_filename(const char *name, utils_file_class_t cls);
+
+/**
+ * @brief Check if a file at the given path is valid for the given file class.
+ * 
+ * @param full_path full file path to check
+ * @param cls file class to check against
+ * @return true if the file is valid for the file class
+ * @return false if the file is not valid for the file class
+ */
+bool utils_is_valid_file(const char *full_path, utils_file_class_t cls);

@@ -65,6 +65,10 @@ bool ssh_cmd_restart_lcm(char *out, size_t out_sz) {
     return (size_t)snprintf(out, out_sz, CMD_RESTART_LCM) < out_sz;
 }
 
+bool ssh_cmd_storage_guardrail(char *out, size_t out_sz) {
+    return (size_t)snprintf(out, out_sz, SCRIPT_STORAGE_GUARDRAIL) < out_sz;
+}
+
 bool build_apply_profile_command(char *out, size_t out_sz, const char *tmp_dir) {
     if (!*out || !tmp_dir)
         return false;

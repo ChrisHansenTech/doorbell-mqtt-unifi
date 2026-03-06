@@ -15,7 +15,7 @@ ssh_session_t *ssh_session_create(const config_ssh_t *ssh_cfg);
 
 void ssh_session_destroy(ssh_session_t *session);
 
-bool ssh_exec_command(ssh_session_t *session, const char *command, char **stdout_data, size_t *stdout_len, char **stderr_data, size_t *stderr_len);
+bool ssh_exec_command(ssh_session_t *session, const char *command, int *exit_status_out, char **stdout_data, size_t *stdout_len, char **stderr_data, size_t *stderr_len);
 
 bool ssh_scp_upload_file(ssh_session_t *session, const char *local_path, const char *remote_dir, unsigned long remote_mode);
 

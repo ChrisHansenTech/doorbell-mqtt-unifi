@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -170,7 +171,7 @@ void ssh_session_destroy(ssh_session_t *s) {
     free(s);
 }
 
-bool ssh_exec_command(ssh_session_t *s, const char *command, char **stdout_data, size_t *stdout_len, char **stderr_data, size_t *stderr_len) {
+bool ssh_exec_command(ssh_session_t *s, const char *command, int *exit_status_out, char **stdout_data, size_t *stdout_len, char **stderr_data, size_t *stderr_len) {
     if (!s || !s->session || !command) {
         LOG_ERROR("ssh_exec_command: invalid arguments.");
         return false;
@@ -254,9 +255,8 @@ bool ssh_exec_command(ssh_session_t *s, const char *command, char **stdout_data,
 
         // Avoid busy-spin if nothing was read this iteration.
         if (!did_work) {
-            // Ideally call your existing libssh2 "wait for socket" helper here.
-            // As a minimal improvement you can yield briefly:
-            // usleep(1000);
+            struct timespec ts = {0, 1000000}; // 1ms in nanoseconds
+            nanosleep(&ts, NULL);
         }
     }
 
@@ -280,9 +280,11 @@ bool ssh_exec_command(ssh_session_t *s, const char *command, char **stdout_data,
         free(err_buf);
     }
 
-    if (exit_status != 0) {
-        LOG_ERROR("SSH command exited non-zero (exit=%d): %s", exit_status, command);
-        return false;
+    if (exit_status_out) {
+        *exit_status_out = exit_status;
+    } else if (exit_status != 0) {
+        LOG_ERROR("SSH command exited non-zero (exit=%d)", exit_status);
+        LOG_DEBUG("Command: %s", command);
     }
 
     return true;

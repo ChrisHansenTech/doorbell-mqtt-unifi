@@ -32,5 +32,26 @@
     {
         "name": "St. Patrick's Day"
     }
-  ]
+  ],
+  "sfx": {
+    "defaultVolume": 50,
+    "presets": [
+        {
+            "name": "Hello",
+            "file": "hello.wav"
+        },
+                {
+            "name": "Invalid File",
+            "file": "invalid_file.mp3"
+        },
+        {
+            "name": "Goodbye",
+            "file": "goodbye.ogg"
+        },
+        {
+            "name": "Directory Traversal",
+            "file": "../../sounds/directory_traversal.wav"
+        }
+    ]
+  }
 }
