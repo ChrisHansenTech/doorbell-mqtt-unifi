@@ -52,7 +52,7 @@ int main(void) {
 
     const char *sounds_dir = getenv("SOUNDS_DIR");
     if (!sounds_dir) {
-        sounds_dir = DEFAULT_PROFILES_DIR;
+        sounds_dir = DEFAULT_SOUNDS_DIR;
     }
 
     migration_run(profiles_dir, sounds_dir, state_dir);
