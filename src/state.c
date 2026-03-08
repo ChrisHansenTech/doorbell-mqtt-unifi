@@ -6,10 +6,12 @@
 #include "logger.h"
 #include "state_types.h"
 #include "utils.h"
+#include "utils_json.h"
 
 #include <openssl/evp.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 
 static int compare_animation_gui_id(const void *a, const void *b)
@@ -199,7 +201,69 @@ int state_load(applied_state_t *state, const char *state_dir) {
         return ERROR_CONFIG_INVALID;
     }
 
-    return 0;
+    char last_applied_path[PATH_MAX];
+    if (!utils_build_path(last_applied_path, sizeof(last_applied_path), state_dir, "last_applied.json")) {
+        LOG_ERROR("Failed to create path for '%s/last_applied.json", state_dir);
+        return ERROR_STATE_FILE_READ_FAILED;
+    }
+
+    memset((void*)state, 0, sizeof(*state));
+
+    char *json_buffer = NULL;
+
+    if (!utils_read_file(last_applied_path, &json_buffer, NULL)) {
+        LOG_ERROR("Failed to read the profile file: %s", last_applied_path);
+        return ERROR_STATE_FILE_READ_FAILED;
+    }
+
+    const char *error_ptr = NULL;
+
+    cJSON *root = cJSON_ParseWithOpts(json_buffer, &error_ptr, false);
+
+    if (!root) {
+        LOG_ERROR("JSON parsing error in %s before: %s", last_applied_path, error_ptr ? error_ptr : "(unknown position)");
+        free(json_buffer);
+        return ERROR_STATE_PARSE_FAILED;
+    }
+
+    free(json_buffer);
+    json_buffer = NULL;
+
+    int rc = ERROR_NONE;
+
+    state->profile_name = strdup(json_get_string(root, "profileName"));
+
+    if (!state->profile_name || state->profile_name[0] == '\0') {
+        rc = ERROR_STATE_PARSE_FAILED;
+        goto cleanup;
+    }
+
+    bool is_preset = false;
+    if(json_get_bool(root, "isPreset", &is_preset)) {
+       state->is_preset = is_preset; 
+    }
+
+    double applied_at = 0;
+    if (json_get_double(root, "appliedAt", &applied_at)) {
+        state->applied_at = (time_t)applied_at;
+    }
+
+    const char *apply_method = json_get_string(root, "applyMethod");
+    if (apply_method != NULL && strcasecmp(apply_method, "ipc") == 0) {
+        state->apply_method = UNIFI_APPLY_IPC;
+    } else {
+        state->apply_method = UNIFI_APPLY_LEGACY;
+    }
+
+    const char *hash = json_get_string(root, "hash");
+    if (hash) {
+        state->hash = strdup(hash);
+    }
+    
+cleanup:
+    cJSON_Delete(root);
+
+    return rc;
 }
 
 int state_save(profile_state_t *profile_state, const char *profile_name, bool is_preset, unifi_apply_method_t apply_method, const char *state_dir) {
@@ -215,7 +279,7 @@ int state_save(profile_state_t *profile_state, const char *profile_name, bool is
 
     if (apply_method == UNIFI_APPLY_IPC) {
         profile_state_sort(profile_state);
-        
+
         if (!profile_state_compute_hash(profile_state, hash)) {
             LOG_WARN("Failed to compute profile state hash; validation will be unavailable");
             state.hash = NULL;
@@ -241,13 +305,37 @@ cleanup:
     return rc;
 }
 
-int state_compare(profile_state_t *active_state) {
-    if (!active_state) {
-        LOG_ERROR("Invalid parameters state=%p", (void*)active_state);
+int state_compare(profile_state_t *active_state, applied_state_t *applied_state, char active_hash[65], const char *state_dir) {
+    if (!active_state || !state_dir) {
+        LOG_ERROR("Invalid parameters active_state=%p, applied_state=%p, state_dir=%p", (void*)active_state, (void*)applied_state, (void*)state_dir);
         return ERROR_CONFIG_INVALID;
     }
 
-    return ERROR_NONE;
+    int rc = ERROR_NONE;
+
+    if ((rc = state_load(applied_state, state_dir)) != ERROR_NONE) {
+        goto out;
+    }
+
+    if (applied_state->apply_method == UNIFI_APPLY_LEGACY) {
+        rc = ERROR_STATE_VALIDATION_UNAVAILABLE;
+        goto out;
+    }
+
+    profile_state_sort(active_state);
+
+    if (!profile_state_compute_hash(active_state, active_hash)) {
+        rc = ERROR_STATE_HASH_FAILED;
+        goto out;
+    }
+
+    if (strcmp(active_hash, applied_state->hash) != 0) {
+        rc = ERROR_STATE_COMPARE_FAILED;
+        goto out;
+    }
+
+out:
+    return rc;
 }
 
 void state_applied_free(applied_state_t *state) {

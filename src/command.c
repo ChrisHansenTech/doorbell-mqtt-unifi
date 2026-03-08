@@ -63,7 +63,7 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         }
     }
 
-    rc = state_save(&profile_state, payload, false, ctx->unifi_cfg->apply_method, ctx->state_dir);
+    rc = state_save(&profile_state, payload, true, ctx->unifi_cfg->apply_method, ctx->state_dir);
     if (rc != ERROR_NONE) {
         HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     } 
@@ -266,7 +266,7 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         }
     }
 
-    rc = state_save(&profile_state, "Test Config", false, ctx->unifi_cfg->apply_method, ctx->state_dir);
+    rc = state_save(&profile_state, "test-config", false, ctx->unifi_cfg->apply_method, ctx->state_dir);
     if (rc != ERROR_NONE) {
         HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
@@ -283,7 +283,7 @@ cleanup:
         status_set_state("idle");
     }
 
-    status_set_last_applied_profile("Test Config");
+    status_set_last_applied_profile("test-config");
     status_set_preset_selected("none");
     status_set_custom_directory("");
     status_set_state("idle");
@@ -323,4 +323,99 @@ cleanup:
 
     status_set_sfx_preset_selected("none");
     status_set_state("idle");
+}
+
+
+void command_validate_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    (void)payload;
+    (void)payloadLen;
+
+    status_set_state("validating");
+
+    int rc = ERROR_NONE;
+    ssh_session_t *session = NULL;
+    time_t now = time(NULL);
+    char iso_timestamp[25];
+    char active_hash[65] = {0};
+    unifi_ipc_raw_t ipc_state = {0};
+    profile_state_t active_state = {0};
+    applied_state_t applied_state = {0};
+    
+    utils_build_iso_timestamp(&now, iso_timestamp, sizeof(iso_timestamp));
+
+    if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_LEGACY) {
+        status_set_state("idle");
+        status_set_validate_profile("unsupported", "", "", "", iso_timestamp);
+        return;
+    }
+
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
+        return;
+    }
+
+    rc = unifi_fetch_state(session, &ipc_state);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to fetch active IPC state");
+        status_set_validate_profile("unknown", "", "", "", iso_timestamp);
+        goto cleanup;
+    }
+
+    if (!unifi_ipc_parse_validate_response(&ipc_state, &active_state)) {
+        HA_ERR(rc, "Failed to parse IPC response");
+        goto cleanup;
+    }
+
+    rc = state_compare(&active_state, &applied_state, active_hash, ctx->state_dir);
+    switch (rc) {
+        case ERROR_NONE: {
+            status_set_validate_profile("match", applied_state.profile_name, applied_state.hash, active_hash, iso_timestamp);
+            break;
+        }
+        case ERROR_STATE_COMPARE_FAILED: {
+            status_set_validate_profile("mismatch", applied_state.profile_name, applied_state.hash, active_hash, iso_timestamp);
+            break;
+        }
+        default:
+            status_set_validate_profile("unknown", "", "", "", iso_timestamp);
+            break; 
+    }
+
+cleanup:
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    unifi_ipc_raw_free(&ipc_state);
+    state_free_profile_state(&active_state);
+    state_applied_free(&applied_state);
+
+    status_set_state("idle");
+}
+
+void command_reapply_last_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    (void)payload;
+    (void)payloadLen;
+
+    status_set_state("validating");
+
+    int rc = ERROR_NONE;
+    applied_state_t applied_state = {0};
+
+    rc = state_load(&applied_state, ctx->state_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to load last_applied.json");
+        return;
+    }
+
+    if (applied_state.is_preset) {
+        command_set_preset(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    } else if (strcasecmp(applied_state.profile_name, "test-config") == 0) {
+        command_test_config(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    } else {
+        command_apply_custom(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    }
+
+    state_applied_free(&applied_state);
 }

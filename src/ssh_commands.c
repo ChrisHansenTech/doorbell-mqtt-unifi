@@ -53,10 +53,6 @@ bool ssh_cmd_mv(char *out, size_t out_sz, const char *src, const char *dst) {
     return (size_t)snprintf(out, out_sz, CMD_MV, src, dst) < out_sz;
 }
 
-bool ssh_cmd_rm_rf(char *out, size_t out_sz, const char *path) {
-    return (size_t)snprintf(out, out_sz, CMD_RM_RF, path) < out_sz;
-}
-
 bool ssh_cmd_reset_dir(char *out, size_t out_sz, const char *path) {
     return (size_t)snprintf(out, out_sz, CMD_RESET_DIR, path, path) < out_sz;
 }

@@ -4,6 +4,7 @@
 #include "config_types.h"
 #include "ha_mqtt.h"
 #include "logger.h"
+#include "migration.h"
 #include "mqtt.h"
 #include "mqtt_router.h"
 #include "ha_topics.h"
@@ -54,6 +55,8 @@ int main(void) {
         sounds_dir = DEFAULT_PROFILES_DIR;
     }
 
+    migration_run(profiles_dir, sounds_dir, state_dir);
+
     if (!utils_delete_directory("/tmp/doorbell-mqtt-unifi")) {
         LOG_WARN("Did not clean '/tmp/doorbell-mqtt-unifi'");
     }
@@ -77,7 +80,7 @@ int main(void) {
 
     ha_topics_init(&cfg);
 
-    if (!ha_mqtt_bind(&cfg)) {
+    if (!ha_mqtt_bind(&cfg, state_dir)) {
         LOG_FATAL("Home Assistant MQTT bind failed. Exiting.");
         rc = 1;
         goto cleanup;

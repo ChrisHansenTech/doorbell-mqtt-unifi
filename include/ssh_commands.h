@@ -4,7 +4,6 @@
 
 #define CMD_MKDIR "mkdir -p '%s'"
 #define CMD_MV "mv '%s' '%s'"
-#define CMD_RM_RF "rm -rf '%s'"
 #define CMD_RESET_DIR "rm -rf '%s' && mkdir -p '%s'"
 #define CMD_RESTART_LCM "systemctl restart unifi-lcm-gui unifi-lcm-sound"
 
@@ -116,8 +115,6 @@ typedef struct {
 bool ssh_cmd_mkdir(char *out, size_t out_sz, const char *path);
 
 bool ssh_cmd_mv(char *out, size_t out_sz, const char *src, const char *dst);
-
-bool ssh_cmd_rm_rf(char *out, size_t out_sz, const char *path);
 
 bool ssh_cmd_reset_dir(char *out, size_t out_sz, const char *path);
 
