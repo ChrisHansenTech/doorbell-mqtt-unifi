@@ -25,6 +25,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true  
 
       - name: Set image name
         run: |
@@ -77,7 +80,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -91,7 +94,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

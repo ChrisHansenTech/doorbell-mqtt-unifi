@@ -119,6 +119,85 @@ If it fails, check:
 
 The **Status** and **Last Error** sensors will provide feedback if something goes wrong.
 
+# Profile Validation
+
+The service includes a profile validation system to confirm that the configuration currently applied to the doorbell matches the expected profile state.
+
+This helps detect situations where:
+
+- Another instance of the service modified the doorbell
+- Manual configuration changes were applied
+- The doorbell restarted and lost its in-memory configuration
+- A profile failed to apply correctly
+
+Validation requires the **IPC apply method**. If the service is configured to use the legacy method, validation will report `unsupported`.
+
+## Validate Profile (Button)
+
+**Entity type:** Button  
+**Purpose:** Verify that the doorbell configuration matches the expected profile
+
+Pressing this button will:
+
+1. Read the doorbell's current configuration via IPC
+2. Normalize and hash the configuration
+3. Compare the computed hash against the stored hash
+
+The result is reported through the **Profile Validation** sensor.
+
+## Reapply Last Profile (Button)
+
+**Entity type:** Button  
+**Purpose:** Reapply the most recently applied profile
+
+Pressing this button will:
+
+- Load the profile stored in `last_applied.json`
+- Reapply that profile to the doorbell
+
+This is useful if:
+
+- The doorbell restarted
+- The configuration was overwritten
+- Another service modified the doorbell configuration
+
+## Profile Validation (Sensor)
+
+**Entity type:** Sensor  
+**Purpose:** Shows whether the doorbell configuration matches the expected profile
+
+Possible values:
+
+| State | Meaning |
+|------|------|
+| match | Doorbell configuration matches the expected profile |
+| mismatch | Doorbell configuration differs from the expected profile |
+| unknown | No previous state hash exists or validation cannot run |
+| unsupported | Validation is unavailable because the service is using the legacy apply method |
+
+If a mismatch occurs, it usually indicates that the doorbell configuration changed outside the service.
+
+## Stored Profile State
+
+When a profile is successfully applied, the service saves a snapshot of the applied configuration to:
+
+```
+/config/last_applied.json
+```
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "profileName": "Test Config",
+  "isPreset": false,
+  "applyMethod": "ipc",
+  "appliedAt": 1772924270,
+  "hash": "c640634b28af478afd9a49abf3e5a8d4869ad0fd0c4e39c7559183d0a9a62b24"
+}
+```
+
 # Status & Diagnostic Sensors
 
 These sensors help you monitor what the service is doing.
@@ -205,6 +284,7 @@ Most Home Assistant users will:
 2. Define presets in `config.json`
 3. Restart the container
 4. Use the **Presets** dropdown to switch doorbell themes
+5. Use **Validate Profile** to confirm the doorbell configuration matches the expected profile
 
 For users who prefer designing assets inside the UniFi Protect app:
 

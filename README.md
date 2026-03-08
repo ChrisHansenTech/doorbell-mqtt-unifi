@@ -118,6 +118,83 @@ Entities include:
 
 Automation is fully local via MQTT.
 
+## Profile Validation
+
+The service includes a profile validation system to confirm that the
+configuration currently applied to the doorbell matches the expected
+profile state.
+
+This helps detect situations where:
+
+-   Another instance of the service modified the doorbell
+-   Manual configuration changes were applied
+-   The doorbell restarted and lost its in-memory configuration
+-   A profile failed to apply correctly
+
+### How It Works
+
+When a profile is applied, the service:
+
+1.  Collects the full animation and sound configuration.
+2.  Sorts the configuration deterministically.
+3.  Computes a SHA-256 hash of the profile state.
+4.  Saves the result to:
+
+```sh
+/config/last_applied.json
+```
+
+Example:
+
+``` json
+{
+  "schemaVersion": 1,
+  "profileName": "Test Config",
+  "isPreset": false,
+  "applyMethod": "ipc",
+  "appliedAt": 1772924270,
+  "hash": "c640634b28af478afd9a49abf3e5a8d4869ad0fd0c4e39c7559183d0a9a62b24"
+}
+```
+
+### Validation Process
+
+When the Validate Profile button is triggered from Home Assistant:
+
+1.  The service reads the doorbell's current configuration via IPC.
+2.  The configuration is normalized and hashed.
+3.  The computed hash is compared against the stored hash.
+
+Possible results:
+
+  | Result      | Meaning |
+  |-------------|---------|
+  | match       | Doorbell configuration matches the expected profile |
+  | mismatch    | Doorbell configuration differs from the expected profile |
+  | unknown     | No previous state hash exists or validation cannot be performed |
+  | unsupported | Apply method is configured as legacy, the feature only works with IPC |
+
+
+### Home Assistant Entities
+
+Button
+
+-   Validate Profile\
+    Triggers a validation check against the currently running doorbell
+    configuration.
+
+Button
+
+-   Reapply last profile\
+    Triggers the service to apply the profile saved in `last_applied.json` back to the doorbell
+
+Sensors
+
+-   Profile Validation\
+    Reports match, mismatch, or unknown.
+
+These diagnostic values help troubleshoot configuration drift
+
 ## Ad-Hoc Sound Effects (SFX)
 
 In addition to profile-based ring sounds, the service supports ad-hoc sound effects (SFX).
