@@ -8,6 +8,7 @@
 /profiles/partial-downloads/
 /profiles/tmp/
 /sounds/
+/state/
 /*.o
 *.o
 *.d

@@ -145,3 +145,23 @@ bool utils_is_valid_filename(const char *name, utils_file_class_t cls);
  * @return false if the file is not valid for the file class
  */
 bool utils_is_valid_file(const char *full_path, utils_file_class_t cls);
+
+/**
+ * @brief Copy the contents of one file to another.
+ * 
+ * @param src source file path
+ * @param dst destination file path
+ * @return true on success
+ * @return false on failure
+ */
+bool utils_copy_file_contents(const char *src, const char *dst);
+
+/**
+ * @brief Move a file from one path to another, even across different filesystems.
+ * 
+ * @param old_path original file path
+ * @param new_path new file path
+ * @return true on success
+ * @return false on failure
+ */
+bool utils_move_file_cross_fs(const char *old_path, const char *new_path);

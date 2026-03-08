@@ -54,7 +54,7 @@ const entity_t HA_ENTITIES[]  = {
     }, {
         .component = "sensor",
         .object_id = "last_error",
-        .name = "Last Error",
+        .name = "Last error",
         .category = "diagnostic",
         .state_topic = "last_error",
         .availability_topic = "availability",
@@ -69,13 +69,27 @@ const entity_t HA_ENTITIES[]  = {
     }, {
         .component = "sensor",
         .object_id = "last_applied_profile",
-        .name = "Last Applied Profile",
+        .name = "Last applied profile",
         .category = NULL,
         .state_topic = "last_applied_profile",
         .availability_topic ="availability",
         .command_topic = NULL,
         .icon = "mdi:badge-account",
         .device_class = NULL,
+        .add_options = NULL,
+        .handle_command = NULL
+    }, {
+        .component = "sensor",
+        .object_id = "profile_validation",
+        .name = "Profile validation",
+        .category = "diagnostic",
+        .state_topic = "profile_validation",
+        .availability_topic ="availability",
+        .command_topic = NULL,
+        .icon = "mdi:shield-check",
+        .device_class = NULL,
+        .json_attributes_topic = "profile_validation/attributes",
+        .json_attributes_template = NULL,
         .add_options = NULL,
         .handle_command = NULL
     }, {
@@ -105,7 +119,7 @@ const entity_t HA_ENTITIES[]  = {
     }, {
         .component = "button",
         .object_id = "test_config",
-        .name = "Test Config",
+        .name = "Test config",
         .category = "config",
         .state_topic = NULL,
         .availability_topic = "availability",
@@ -117,7 +131,7 @@ const entity_t HA_ENTITIES[]  = {
     }, {
         .component = "button",
         .object_id = "download_assets",
-        .name = "Asset Download",
+        .name = "Asset download",
         .category = NULL,
         .state_topic = NULL,
         .availability_topic = "availability",
@@ -127,9 +141,33 @@ const entity_t HA_ENTITIES[]  = {
         .add_options = NULL,
         .handle_command = command_download_assets
     }, {
+        .component = "button",
+        .object_id = "profile_validate",
+        .name = "Validate profile",
+        .category = "config",
+        .state_topic = NULL,
+        .availability_topic = "availability",
+        .command_topic = "cmd/validate_profile",
+        .icon = "mdi:check-circle-outline",
+        .device_class = NULL,
+        .add_options = NULL,
+        .handle_command = command_validate_profile
+    },{
+        .component = "button",
+        .object_id = "reapply_last_profile",
+        .name = "Reapply last profile",
+        .category = "config",
+        .state_topic = NULL,
+        .availability_topic = "availability",
+        .command_topic = "cmd/reapply_last_profile",
+        .icon = "mdi:restore",
+        .device_class = NULL,
+        .add_options = NULL,
+        .handle_command = command_reapply_last_profile
+    },{
         .component = "sensor",
         .object_id = "last_download",
-        .name = "Last Asset Download",
+        .name = "Last asset download",
         .category = "diagnostic",
         .state_topic = "last_download/time/state",
         .availability_topic = "availability",
@@ -144,7 +182,7 @@ const entity_t HA_ENTITIES[]  = {
     }, {
         .component = "select",
         .object_id = "sfxpreset",
-        .name = "SFX Presets",
+        .name = "SFX presets",
         .category = NULL,
         .state_topic = "sfxpreset/selected",
         .availability_topic ="availability",
@@ -156,4 +194,4 @@ const entity_t HA_ENTITIES[]  = {
     }
 };
 
-const size_t HA_ENTITIES_COUNT = 9;
+const size_t HA_ENTITIES_COUNT = 12;

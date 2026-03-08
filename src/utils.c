@@ -5,6 +5,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -582,4 +583,54 @@ bool utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
 
     fclose(f);
     return ok;
+}
+
+bool utils_copy_file_contents(const char *src, const char *dst) {
+    int in_fd = -1, out_fd = -1;
+    bool ok = false;
+
+    in_fd = open(src, O_RDONLY);
+    if (in_fd < 0) return false;
+
+    out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out_fd < 0) goto cleanup;
+
+    char buf[64 * 1024];
+    for (;;) {
+        ssize_t r = read(in_fd, buf, sizeof(buf));
+        if (r == 0) break;                 // EOF
+        if (r < 0) goto cleanup;
+
+        ssize_t off = 0;
+        while (off < r) {
+            ssize_t w = write(out_fd, buf + off, (size_t)(r - off));
+            if (w < 0) goto cleanup;
+            off += w;
+        }
+    }
+
+    (void)fsync(out_fd);
+
+    ok = true;
+
+cleanup:
+    if (out_fd >= 0) close(out_fd);
+    if (in_fd >= 0) close(in_fd);
+    return ok;
+}
+
+bool utils_move_file_cross_fs(const char *old_path, const char *new_path) {
+    if (rename(old_path, new_path) == 0) return true;
+
+    if (errno != EXDEV) {
+        return false;
+    }
+
+    if (!utils_copy_file_contents(old_path, new_path)) return false;
+
+    if (unlink(old_path) != 0) {
+        return false;
+    }
+
+    return true;
 }

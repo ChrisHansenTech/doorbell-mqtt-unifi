@@ -1,12 +1,14 @@
 #include "ha_mqtt.h"
+#include "errors.h"
 #include "ha_discovery.h"
 #include "ha_status.h"
 #include "ha_topics.h"
 #include "mqtt.h"
-#include "unifi_profile.h"
-#include "unifi_profiles_repo.h"
+#include "state.h"
+#include "state_types.h"
 
 static const config_t *g_cfg = NULL;
+static const char *g_state_dir = NULL;
 
 static void ha_on_connect(bool reconnect, void *user)
 {
@@ -16,8 +18,8 @@ static void ha_on_connect(bool reconnect, void *user)
     ha_publish_discovery(g_cfg);
     ha_topic_subscribe_commands();
 
-    unifi_last_applied_profile_t last_applied;
-    if (!profile_load_last_applied(&last_applied)) {
+    applied_state_t last_applied = {0};
+    if (state_load(&last_applied, g_state_dir) != ERROR_NONE) {
         LOG_WARN("Failed to load last_applied.json, state will not be restored");
     } else {
         status_set_last_applied_profile(last_applied.profile_name);
@@ -26,7 +28,7 @@ static void ha_on_connect(bool reconnect, void *user)
             status_set_preset_selected(last_applied.profile_name);
             status_set_custom_directory("");
         } else {
-            status_set_custom_directory(last_applied.profile_name);
+            status_set_custom_directory("");
             status_set_preset_selected("none");
         }
     }
@@ -41,9 +43,10 @@ static void ha_on_disconnect(void *user)
     status_set_availability(false);
 }
 
-bool ha_mqtt_bind(const config_t *cfg)
+bool ha_mqtt_bind(const config_t *cfg, const char *state_dir)
 {
     g_cfg = cfg;
+    g_state_dir = state_dir;
 
     mqtt_set_last_will(
         ha_availability_topic(),

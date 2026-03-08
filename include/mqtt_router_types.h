@@ -14,6 +14,7 @@ typedef struct mqtt_router_ctx {
     const config_preset_t *preset_cfg;
     const config_unifi_t *unifi_cfg;
     const sfx_ctx_t *sfx_ctx;
+    const char *state_dir;
 } mqtt_router_ctx_t;
 
 typedef void (*mqtt_handler_fn)(const mqtt_router_ctx_t *ctx, const char *payload, size_t len);

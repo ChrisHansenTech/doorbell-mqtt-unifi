@@ -4,6 +4,9 @@
 #include "ha_status.h"
 #include "mqtt_router_types.h"
 #include "ssh.h"
+#include "state.h"
+#include "state_types.h"
+#include "unifi_ipc.h"
 #include "unifi_profile.h"
 #include "unifi_profile_json.h"
 #include "unifi_profiles_repo.h"
@@ -28,6 +31,8 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
     ssh_session_t *session = NULL;
     char profile_path[PATH_MAX];
     unifi_profile_t profile;
+    unifi_ipc_raw_t ipc_state = {0};
+    profile_state_t profile_state = {0};
 
     if (!profiles_repo_resolve_preset(payload, profile_path, sizeof(profile_path))) {
         HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Profile directory for preset '%s' not found", payload);
@@ -45,15 +50,23 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
-    if (!profiles_write_last_applied(payload, true)) {
-        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_IPC) {
+        if (!unifi_ipc_parse_apply_response(&ipc_state, &profile_state)) {
+            HA_ERR(ERROR_STATE_PARSE_FAILED, "Failed to parse IPC state response. State will not survive restart of service");
+            goto cleanup;
+        }
     }
+
+    rc = state_save(&profile_state, payload, true, ctx->unifi_cfg->apply_method, ctx->state_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    } 
 
     ok = true;
 
@@ -84,6 +97,8 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
     ssh_session_t *session = NULL;
     char profile_path[PATH_MAX];
     unifi_profile_t profile;
+    unifi_ipc_raw_t ipc_state = {0};
+    profile_state_t profile_state = {0};
 
     if (!utils_build_path(profile_path, sizeof(profile_path), "./profiles", payload)) {
         goto cleanup;
@@ -105,15 +120,23 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
-    if (!profiles_write_last_applied(payload, false)) {
-        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_IPC) {
+        if (!unifi_ipc_parse_apply_response(&ipc_state, &profile_state)) {
+            HA_ERR(ERROR_STATE_PARSE_FAILED, "Failed to parse IPC state response. State will not survive restart of service");
+            goto cleanup;
+        }
     }
+
+    rc = state_save(&profile_state, payload, false, ctx->unifi_cfg->apply_method, ctx->state_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    } 
 
     ok = true;
 
@@ -214,6 +237,8 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
     ssh_session_t *session = NULL;
     char profile_path[PATH_MAX] = "./test-profile";
     unifi_profile_t profile;
+    unifi_ipc_raw_t ipc_state = {0};
+    profile_state_t profile_state = {0};
 
     if (!unifi_profile_load_from_file(profile_path, &profile)) {
         HA_ERR(ERROR_PROFILE_INVALID, "Error loading profile.json for test");
@@ -226,28 +251,39 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         return;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method);
+    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
     if (rc != ERROR_NONE) {
         HA_ERR(rc, "Failed to upload and apply profile");
         goto cleanup;
     }
 
-    if (!profiles_write_last_applied(payload, true)) {
-        LOG_WARN("Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    ok = true;
+
+    if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_IPC) {
+        if (!unifi_ipc_parse_apply_response(&ipc_state, &profile_state)) {
+            HA_ERR(ERROR_STATE_PARSE_FAILED, "Failed to parse IPC state response. State will not survive restart of service");
+            goto cleanup;
+        }
     }
 
-    ok = true;
+    rc = state_save(&profile_state, "test-config", false, ctx->unifi_cfg->apply_method, ctx->state_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
+    }
+     
 
 cleanup: 
     if (session) {
         ssh_session_destroy(session);
     }
 
+    unifi_ipc_raw_free(&ipc_state);
+
     if (!ok) {
         status_set_state("idle");
     }
 
-    status_set_last_applied_profile("Test Config");
+    status_set_last_applied_profile("test-config");
     status_set_preset_selected("none");
     status_set_custom_directory("");
     status_set_state("idle");
@@ -287,4 +323,99 @@ cleanup:
 
     status_set_sfx_preset_selected("none");
     status_set_state("idle");
+}
+
+
+void command_validate_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    (void)payload;
+    (void)payloadLen;
+
+    status_set_state("validating");
+
+    int rc = ERROR_NONE;
+    ssh_session_t *session = NULL;
+    time_t now = time(NULL);
+    char iso_timestamp[25];
+    char active_hash[65] = {0};
+    unifi_ipc_raw_t ipc_state = {0};
+    profile_state_t active_state = {0};
+    applied_state_t applied_state = {0};
+    
+    utils_build_iso_timestamp(&now, iso_timestamp, sizeof(iso_timestamp));
+
+    if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_LEGACY) {
+        status_set_state("idle");
+        status_set_validate_profile("unsupported", "", "", "", iso_timestamp);
+        return;
+    }
+
+    session = ssh_session_create(ctx->ssh_cfg);
+    if (!session) {
+        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
+        return;
+    }
+
+    rc = unifi_fetch_state(session, &ipc_state);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to fetch active IPC state");
+        status_set_validate_profile("unknown", "", "", "", iso_timestamp);
+        goto cleanup;
+    }
+
+    if (!unifi_ipc_parse_validate_response(&ipc_state, &active_state)) {
+        HA_ERR(rc, "Failed to parse IPC response");
+        goto cleanup;
+    }
+
+    rc = state_compare(&active_state, &applied_state, active_hash, ctx->state_dir);
+    switch (rc) {
+        case ERROR_NONE: {
+            status_set_validate_profile("match", applied_state.profile_name, applied_state.hash, active_hash, iso_timestamp);
+            break;
+        }
+        case ERROR_STATE_COMPARE_FAILED: {
+            status_set_validate_profile("mismatch", applied_state.profile_name, applied_state.hash, active_hash, iso_timestamp);
+            break;
+        }
+        default:
+            status_set_validate_profile("unknown", "", "", "", iso_timestamp);
+            break; 
+    }
+
+cleanup:
+    if (session) {
+        ssh_session_destroy(session);
+    }
+
+    unifi_ipc_raw_free(&ipc_state);
+    state_free_profile_state(&active_state);
+    state_applied_free(&applied_state);
+
+    status_set_state("idle");
+}
+
+void command_reapply_last_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
+    (void)payload;
+    (void)payloadLen;
+
+    status_set_state("validating");
+
+    int rc = ERROR_NONE;
+    applied_state_t applied_state = {0};
+
+    rc = state_load(&applied_state, ctx->state_dir);
+    if (rc != ERROR_NONE) {
+        HA_ERR(rc, "Failed to load last_applied.json");
+        return;
+    }
+
+    if (applied_state.is_preset) {
+        command_set_preset(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    } else if (strcasecmp(applied_state.profile_name, "test-config") == 0) {
+        command_test_config(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    } else {
+        command_apply_custom(ctx, applied_state.profile_name, strlen(applied_state.profile_name));
+    }
+
+    state_applied_free(&applied_state);
 }

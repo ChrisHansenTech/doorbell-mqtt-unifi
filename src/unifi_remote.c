@@ -9,6 +9,7 @@
 #include "unifi_profile_conf.h"
 #include "utils.h"
 
+#include <complex.h>
 #include <errno.h>
 #include <linux/limits.h>
 #include <stdbool.h>
@@ -476,28 +477,43 @@ cleanup:
     return rc;
 }
 
-static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
+static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd, unifi_ipc_raw_t *state) {
     if (!session || !wd) {
         return ERROR_PROFILE_INVALID;
     }
 
     int rc = ERROR_NONE;
+    
+    
     char ssh_cmd[8192];
     char lcm_payload_path[PATH_MAX];
     char sound_payload_path[PATH_MAX];
-    char *out = NULL;
-    char *err = NULL;
-    size_t out_len = 0;
-    size_t err_len = 0;
+    
+    char *std_out = NULL;
+    char *err_out = NULL;
+    size_t std_out_len = 0;
+    size_t err_out_len = 0;
+
+    int lcm_rc = -1;
+    char *lcm_out = NULL;
+    char *lcm_err = NULL;
+    size_t lcm_out_len = 0;
+    size_t lcm_err_len = 0;
+
+    int sound_rc = -1;
+    char *sound_out = NULL;
+    char *sound_err = NULL;
+    size_t sound_out_len = 0;
+    size_t sound_err_len = 0;
 
     if (!build_move_assets_ipc(ssh_cmd, sizeof(ssh_cmd), wd->remote_temp_path)) {
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
     
-    if (!ssh_exec_command(session, ssh_cmd, NULL, &out, &out_len, &err, &err_len)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, &std_out, &std_out_len, &err_out, &err_out_len)) {
         ssh_step_error_t step_error;
-        if (ssh_parse_step_error(err, &step_error)) {
+        if (ssh_parse_step_error(err_out, &step_error)) {
             LOG_ERROR("Move assets IPC failed at step '%s' with return code '%d'", step_error.step, step_error.rc);
             rc = map_apply_step_to_error(step_error.step, step_error.rc);
         }
@@ -516,7 +532,7 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, &lcm_rc, &lcm_out, &lcm_out_len, &lcm_err, &lcm_err_len)) {
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
@@ -531,31 +547,62 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, &sound_rc, &sound_out, &sound_out_len, &sound_err, &sound_err_len)) {
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
 
-cleanup:
-    if (out) {
-        free(out);
+    if (lcm_rc != ERROR_NONE || sound_rc != ERROR_NONE) {
+        rc = ERROR_PROFILE_APPLY_FAILED;
     }
 
-    if (err) {
-        free(err);
+    state->lcm_gui_json = lcm_out;
+    lcm_out = NULL;
+    
+    state->sounds_leds_json = sound_out;
+    sound_out = NULL;
+    
+cleanup:
+    if (std_out) {
+        free(std_out);
+    }
+
+    if (err_out) {
+        free(err_out);
+    }
+
+    if (lcm_out) {
+        free(lcm_out);
+    }
+
+    if (lcm_err) {
+        free(lcm_err);
+    }
+
+    if (sound_out) {
+        free(sound_out);
+    }
+    
+    if (sound_err) {
+        free(sound_err);
+    }
+
+    if (rc != ERROR_NONE) {
+        state->lcm_gui_json = NULL;
+        state->sounds_leds_json = NULL;
     }
 
     return rc;
 }
 
-static int unifi_apply_method(ssh_session_t *session, const unifi_workdir_t *wd, unifi_apply_method_t method) {
+static int unifi_apply_method(ssh_session_t *session, const unifi_workdir_t *wd, unifi_apply_method_t method, unifi_ipc_raw_t *state) {
     if (!session || !wd) {
         return ERROR_PROFILE_INVALID;
     }
 
     switch (method) {
         case UNIFI_APPLY_IPC:
-            return ipc_apply(session, wd);
+            return ipc_apply(session, wd, state);
         case UNIFI_APPLY_LEGACY:
         default:
             return legacy_apply(session, wd);
@@ -701,13 +748,13 @@ int unifi_profile_upload_and_apply(ssh_session_t *session, const char *profile_d
 
     int result = ERROR_NONE;
 
-    result = unifi_profile_upload_and_apply_ex(session, profile_dir, profile, UNIFI_APPLY_IPC);
+    result = unifi_profile_upload_and_apply_ex(session, profile_dir, profile, UNIFI_APPLY_IPC, NULL);
 
     return result;
 }
 
 
-int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method) {
+int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state) {
     if (!session || !profile_dir || !profile) {
         LOG_ERROR("Invalid parameters session=%p, profile_dir=%p, profile=%p", (void*)session, (void*)profile_dir , (void*)profile);
         return ERROR_PROFILE_INVALID;
@@ -735,7 +782,7 @@ int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profil
         goto cleanup;
     }
 
-    if ((rc = unifi_apply_method(session, &wd, method)) != ERROR_NONE) {
+    if ((rc = unifi_apply_method(session, &wd, method, applied_state)) != ERROR_NONE) {
         goto cleanup;
     }
 
@@ -777,4 +824,82 @@ cleanup:
     }
 
     return rc;
+}
+
+int unifi_fetch_state(ssh_session_t *session, unifi_ipc_raw_t *out_state) {
+    if (!session || !out_state) {
+        LOG_ERROR("Invalid parameters session=%p, out_state=%p", (void*)session, (void*)out_state);
+        return ERROR_CONFIG_INVALID;
+    }
+
+    int rc = ERROR_NONE;
+
+    char ssh_cmd[8192];
+
+    int lcm_rc = -1;
+    char *lcm_out = NULL;
+    char *lcm_err = NULL;
+    size_t lcm_out_len = 0;
+    size_t lcm_err_len = 0;
+
+    int sound_rc = -1;
+    char *sound_out = NULL;
+    char *sound_err = NULL;
+    size_t sound_out_len = 0;
+    size_t sound_err_len = 0;
+
+    if (!ssh_cmd_ipc_cli_cfg(ssh_cmd, sizeof(ssh_cmd), "ubnt_lcm_gui", "ChangeLcmGuiSettings", "customAnimations")) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (!ssh_exec_command(session, ssh_cmd, &lcm_rc, &lcm_out, &lcm_out_len, &lcm_err, &lcm_err_len)) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (!ssh_cmd_ipc_cli_cfg(ssh_cmd, sizeof(ssh_cmd), "ubnt_sounds_leds", "ChangeSoundLedSettings", "customSounds")) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (!ssh_exec_command(session, ssh_cmd, &sound_rc, &sound_out, &sound_out_len, &sound_err, &sound_err_len)) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (lcm_rc != ERROR_NONE || sound_rc != ERROR_NONE) {
+        rc = ERROR_PROFILE_APPLY_FAILED;
+    }
+
+    out_state->lcm_gui_json = lcm_out;
+    lcm_out = NULL;
+    
+    out_state->sounds_leds_json = sound_out;
+    sound_out = NULL;
+    
+cleanup:
+    if (lcm_out) {
+        free(lcm_out);
+    }
+
+    if (lcm_err) {
+        free(lcm_err);
+    }
+
+    if (sound_out) {
+        free(sound_out);
+    }
+    
+    if (sound_err) {
+        free(sound_err);
+    }
+
+    if (rc != ERROR_NONE) {
+        out_state->lcm_gui_json = NULL;
+        out_state->sounds_leds_json = NULL;
+    }
+
+    return rc;
+
 }

@@ -46,8 +46,19 @@ jobs:
             VERSION="${{ inputs.version }}"
           else
             SHORTSHA="$(git rev-parse --short HEAD)"
-            VERSION="0.2.0-dev+${SHORTSHA}"
+
+            # Get latest tag (strip leading v if present)
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+            LAST_TAG=${LAST_TAG#v}
+
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$LAST_TAG"
+
+            # bump minor for dev version
+            NEXT_MINOR=$((MINOR + 1))
+
+            VERSION="${MAJOR}.${NEXT_MINOR}.0-dev+${SHORTSHA}"
           fi
+
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "SHORTSHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
@@ -78,7 +89,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ env.IMAGE }}:dev
-            ghcr.io/${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
+            ${{ env.IMAGE }}:dev
+            ${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
