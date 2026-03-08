@@ -56,6 +56,23 @@ static int unifi_prepare_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
     return ERROR_NONE;
 }
 
+static void unifi_cleanup_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
+    char ssh_cmd[8192];
+
+    if (!utils_delete_directory(wd->local_temp_dir)) {
+        LOG_WARN("Failed to delete '%s'", wd->local_temp_dir);
+    }
+
+    if (!ssh_cmd_reset_dir(ssh_cmd, sizeof(ssh_cmd), wd->remote_temp_path)) {
+        LOG_WARN("Failed to delete reset'%s'", wd->remote_temp_path);
+        return;
+    }
+    
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
+        LOG_WARN("Failed to delete reset'%s'", wd->remote_temp_path);
+    }
+}
+
 static int map_apply_step_to_error(const char *step, int rc) {
     if (!step) {
         return ERROR_PROFILE_APPLY_FAILED;
@@ -787,9 +804,7 @@ int unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profil
     }
 
 cleanup:
-    if (!utils_delete_directory(wd.local_temp_dir)) {
-        LOG_WARN("Failed to delete '%s'", wd.local_temp_dir);
-    }
+    unifi_cleanup_workdirs(session, &wd);
 
     return rc;
 }
@@ -819,9 +834,7 @@ int unifi_sfx_upload_and_play(ssh_session_t *session, const config_sfx_preset_it
     }
 
 cleanup:
-    if (!utils_delete_directory(wd.local_temp_dir)) {
-        LOG_WARN("Failed to delete '%s'", wd.local_temp_dir);
-    }
+    unifi_cleanup_workdirs(session, &wd);
 
     return rc;
 }
