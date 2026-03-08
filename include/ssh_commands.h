@@ -96,7 +96,9 @@
     "echo \"OK: storage guardrail passed\"; " \
     "exit 0"
 
-#define CMD_IPC_CLI "ubnt_ipc_cli -T=%s -f=%s -M=%s -r=1 -F=- -z"
+#define CMD_IPC_CLI "ubnt_ipc_cli -T=%s -f=ubnt_ipc_cli -M=%s -r=1 -F=- -z"
+
+#define CMD_IPC_CLI_CFG "ubnt_ipc_cli -T=%s -f=ubnt_ipc_cli -n=%s -p=%s -r=1 -F=- -z"
 
 #define CMD_PLAY_SFX \
     "/usr/local/bin/playSound.sh '%s' -v %d; " \
@@ -128,6 +130,8 @@ bool build_apply_profile_command(char *out, size_t out_sz, const char *tmp_dir);
 bool ssh_parse_step_error(const char *stderr_text, ssh_step_error_t *out);
 
 bool ssh_cmd_ipc_cli(char *out, size_t out_sz, const char *target, const char *payload_path);
+
+bool ssh_cmd_ipc_cli_cfg(char *out, size_t out_sz, const char *target, const char *function, const char *config);
 
 bool build_move_assets_ipc(char *out, size_t out_sz, const char *tmp_dir);
 

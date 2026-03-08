@@ -18,6 +18,7 @@
 #define DEFAULT_CONFIG_PATH   "/config/config.json"
 #define DEFAULT_PROFILES_DIR  "/profiles"
 #define DEFAULT_SOUNDS_DIR    "/sounds"
+#define DEFAULT_STATE_DIR     "/config/state"
 
 static volatile int running = 1;
 static void handle_signal(int sig) {
@@ -36,6 +37,11 @@ int main(void) {
     const char *config_path = getenv("CONFIG_PATH");
     if (!config_path) {
         config_path = DEFAULT_CONFIG_PATH;
+    }
+
+    const char *state_dir = getenv("STATE_DIR");
+    if (!state_dir) {
+        state_dir = DEFAULT_STATE_DIR;
     }
 
     const char *profiles_dir = getenv("PROFILES_DIR");
@@ -94,6 +100,7 @@ int main(void) {
     inbound_ctx.preset_cfg = &cfg.preset_cfg;
     inbound_ctx.unifi_cfg = &cfg.unifi_cfg;
     inbound_ctx.sfx_ctx = &sfx_ctx;
+    inbound_ctx.state_dir = state_dir;
 
     if (!mqtt_router_start(&inbound_ctx)) {
         LOG_FATAL("MQTT inbound worker failed to start. Exiting.");

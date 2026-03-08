@@ -55,6 +55,18 @@ X(4404, ERROR_SFX_FILE_INVALID, "SFX file is invalid")
 X(4405, ERROR_SFX_VOLUME_INVALID, "SFX volume is invalid")
 X(4406, ERROR_SFX_UPLOAD_FAILED, "SFX upload failed")
 X(4408, ERROR_SFX_PLAY_COMMAND_FAILED, "SFX play command failed")
+X(5000, ERROR_STATE_FAILED, "State operation failed")
+X(5001, ERROR_STATE_SAVE_FAILED, "Failed to save state file")
+X(5002, ERROR_STATE_LOAD_FAILED, "Failed to load state file")
+X(5003, ERROR_STATE_FILE_NOT_FOUND, "State file not found")
+X(5004, ERROR_STATE_FILE_INVALID, "State file is invalid")
+X(5005, ERROR_STATE_FILE_READ_FAILED, "Failed to read state file")
+X(5006, ERROR_STATE_FILE_WRITE_FAILED, "Failed to write state file")
+X(5007, ERROR_STATE_PARSE_FAILED, "Failed to parse state JSON")
+X(5008, ERROR_STATE_HASH_FAILED, "Failed to compute state hash")
+X(5009, ERROR_STATE_COMPARE_FAILED, "State comparison failed")
+X(5010, ERROR_STATE_VALIDATION_UNAVAILABLE, "State validation unavailable")
+X(5011, ERROR_STATE_HASH_MISSING, "State hash missing for comparison")
 
 
 

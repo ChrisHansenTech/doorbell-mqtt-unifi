@@ -154,7 +154,11 @@ bool ssh_parse_step_error(const char *stderr_text, ssh_step_error_t *out) {
 }
 
 bool ssh_cmd_ipc_cli(char *out, size_t out_sz, const char *target, const char *payload_path) {
-    return (size_t)snprintf(out, out_sz, CMD_IPC_CLI, target, target, payload_path) < out_sz;
+    return (size_t)snprintf(out, out_sz, CMD_IPC_CLI, target, payload_path) < out_sz;
+}
+
+bool ssh_cmd_ipc_cli_cfg(char *out, size_t out_sz, const char *target, const char *function, const char *config) {
+    return (size_t)snprintf(out, out_sz, CMD_IPC_CLI_CFG, target, function, config) < out_sz;
 }
 
 
