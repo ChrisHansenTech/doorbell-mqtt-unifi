@@ -19,12 +19,32 @@ Designed for reliability, speed, and clean Home Assistant integration.
 ## Why Use It?
 
 - Apply animation & sound changes in under 2 seconds (IPC mode)
+- Ad-hoc doorbell SFX
 - Native Home Assistant MQTT Discovery integration
-- Safe legacy compatibility for existing users
 - Clean multi-doorbell support (one container per device)
 - Docker-first deployment model
 
 No polling. No background agent on the doorbell. No cloud round trips.
+
+## Supported Architectures
+
+The container image is published as a multi-architecture image and
+automatically pulls the correct platform for your system.
+
+Supported container platforms:
+
+- `linux/amd64`
+- `linux/arm64`
+
+Validated environments:
+
+- Docker on `linux/amd64`
+- Docker on `linux/arm64` (Raspberry Pi 4)
+- Native build on Ubuntu under WSL2
+- Native build on Raspberry Pi OS Lite 64-bit
+
+The service is written in portable C and has been validated on both x86_64
+and ARM64 systems.
 
 ## Apply Methods
 
@@ -226,7 +246,6 @@ Playback typically begins in under 1 second.
 
 SFX playback is mutex-protected to prevent concurrent executions.
 
-
 ## Quick Start (Docker Recommended)
 
 On first startup, if `/config/config.json` does not exist, the container generates a sample configuration file.
@@ -244,20 +263,81 @@ docker run -d \
   -e UNIFI_PROTECT_RECOVERY_CODE=your_recovery_code \
   -v /path/to/config:/config \
   -v /path/to/profiles:/profiles \
+  -v /path/to/sounds:/sounds \
   ghcr.io/chrishansentech/doorbell-mqtt-unifi:latest
 ```
 
 Restart the container after modifying `config.json`.
 
-## Profile Configuration Note
+## Native Build
 
-In `profile.json`, `welcome.durationMs` represents the **total animation duration**, not per-frame duration.
+Although Docker is the recommended deployment method, the service can also be built and run directly on Linux.
+
+Build tools:
+
+- `build-essential`
+- `pkg-config`
+
+Libraries:
+
+- `libssl-dev`
+- `libssh2-1-dev`
+- `libpaho-mqtt-dev`
+
+Example for Debian, Ubuntu, or Raspberry Pi OS:
+
+```bash
+sudo apt update  
+sudo apt install -y \  
+  build-essential \  
+  pkg-config \  
+  libssl-dev \  
+  libssh2-1-dev \  
+  libpaho-mqtt-dev
+```
+
+Build and run:
+
+```bash
+git clone https://github.com/ChrisHansenTech/doorbell-mqtt-unifi.git  
+cd doorbell-mqtt-unifi  
+make  
+./bin/doorbell-mqtt-unifi
+```
+### Runtime Paths
+
+When running natively, the service expects the same default paths used by the Docker container.
+
+Default values:
+
+| Environment Variable          | Default               |
+| ----------------------------- | --------------------- |
+| `DOORBELL_CONFIG_PATH`        | `/config/config.json` |
+| `DOORBELL_STATE_DIR`          | `/config/state`       |
+| `DOORBELL_PROFILES_DIR`       | `/profiles`           |
+| `DOORBELL_SOUNDS_DIR`         | `/sounds`             |
+
+If these environment variables are not set, the service will use the defaults above.
+
+When running outside Docker, you will typically want to override them.
 
 Example:
 
-If `count = 57` and `durationMs = 1900`, the animation runs at approximately 30 FPS.
+```bash
+export DOORBELL_CONFIG_PATH=./config/config.json  
+export DOORBELL_STATE_DIR=./config/state  
+export DOORBELL_PROFILES_DIR=./profiles  
+export DOORBELL_SOUNDS_DIR=./sounds
+```
 
-Lower values increase animation speed.
+You can also load them from a `.env` file:
+
+```bash
+set -a  
+source .env  
+set +a  
+./doorbell-mqtt-unifi
+```
 
 ## License
 
