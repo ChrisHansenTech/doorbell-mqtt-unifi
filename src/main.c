@@ -35,22 +35,22 @@ int main(void) {
 
     print_banner();
 
-    const char *config_path = getenv("CONFIG_PATH");
+    const char *config_path = getenv("DOORBELL_CONFIG_PATH");
     if (!config_path) {
         config_path = DEFAULT_CONFIG_PATH;
     }
 
-    const char *state_dir = getenv("STATE_DIR");
+    const char *state_dir = getenv("DOORBELL_STATE_DIR");
     if (!state_dir) {
         state_dir = DEFAULT_STATE_DIR;
     }
 
-    const char *profiles_dir = getenv("PROFILES_DIR");
+    const char *profiles_dir = getenv("DOORBELL_PROFILES_DIR");
     if (!profiles_dir) {
         profiles_dir = DEFAULT_PROFILES_DIR;
     }
 
-    const char *sounds_dir = getenv("SOUNDS_DIR");
+    const char *sounds_dir = getenv("DOORBELL_SOUNDS_DIR");
     if (!sounds_dir) {
         sounds_dir = DEFAULT_SOUNDS_DIR;
     }
