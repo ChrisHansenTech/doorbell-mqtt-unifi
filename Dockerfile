@@ -5,7 +5,6 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     git \
-    libssl-dev \
     pkg-config \
     libssl-dev \
     libssh2-1-dev \
@@ -43,6 +42,6 @@ COPY test-profile/ /app/test-profile/
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-VOLUME ["/config", "/profiles"]
+VOLUME ["/config", "/profiles", "/sounds"]
 
 ENTRYPOINT ["/entrypoint.sh"]

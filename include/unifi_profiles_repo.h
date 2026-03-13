@@ -14,7 +14,7 @@
  * @return true 
  * @return false 
  */
-bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg);
+bool profiles_repo_init(const char *base_dir, const config_preset_t *presets);
 
 /**
  * @brief Resolve the given preset name to an profile directory.

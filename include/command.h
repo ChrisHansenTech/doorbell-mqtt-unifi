@@ -54,3 +54,30 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
  * @param payloadLen 
  */
 void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen);
+
+/**
+ * @brief Plays a SFX preset based on the provided payload.
+ * 
+ * @param ctx 
+ * @param payload 
+ * @param payloadLen 
+ */
+void command_play_sfx_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen);
+
+/**
+ * @brief Validates the profile by downloading it and comparing it to the currently active profile on the device.
+ * 
+ * @param ctx 
+ * @param payload 
+ * @param payloadLen 
+ */
+void command_validate_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen);
+
+/**
+ * @brief Reapplies the last applied profile by loading it from disk and applying it again.
+ * 
+ * @param ctx 
+ * @param payload 
+ * @param payloadLen 
+ */
+void command_reapply_last_profile(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen);

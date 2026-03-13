@@ -15,7 +15,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-static const config_preset_t *g_profiles_cfg = NULL; 
+static const config_preset_t *g_profiles_cfg = NULL;
 static char *g_profiles_dir = NULL;
 
 static bool profiles_initialized(void) {
@@ -33,7 +33,7 @@ static const char *config_get_preset_directory(const char *preset_name) {
     return NULL;
 }
 
-bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
+bool profiles_repo_init(const char *base_dir, const config_preset_t *presets) {
     if(profiles_initialized()) {
         LOG_ERROR("profiles_init called more than once.");
         return false;
@@ -52,7 +52,7 @@ bool profiles_repo_init(const char *base_dir, const config_preset_t *cfg) {
         return false;
     }
 
-    g_profiles_cfg = cfg;
+    g_profiles_cfg = presets;
 
     LOG_INFO("Profile repository initialized with base directory '%s'.", g_profiles_dir);
     return true;
@@ -194,131 +194,6 @@ bool profiles_repo_rename_temp_profile_dir(const char *temp_dir, time_t *time, b
         LOG_WARN("Out value of '%s' was truncated from '%s'", out_path, final_path);
     }
     
-    return true;
-}
-
-bool profiles_write_last_applied(const char *name, bool is_preset) {
-    if (!name) {
-        LOG_ERROR("Invalid parameters: name=%p", (void*)name);
-        return false;
-    }
-
-    char state_path[PATH_MAX];
-    if (!utils_build_path(state_path, sizeof(state_path), g_profiles_dir, ".state/")) {
-        LOG_ERROR("Failed to create path for profile '%s/.state/'", g_profiles_dir);
-        return false;
-    }
-
-    if (!utils_create_directory(state_path)) {
-        LOG_ERROR("Failed to create directory '%s'", state_path);
-        return false;
-    }
-
-    char last_applied_path[PATH_MAX];
-    if (!utils_build_path(last_applied_path, sizeof(last_applied_path), state_path, "last_applied.json")) {
-        LOG_ERROR("Failed to create path for '%s/last_applied.json", state_path);
-        return false;
-    }
-
-    cJSON *root = cJSON_CreateObject();
-
-    if (!root) {
-        LOG_ERROR("Failed to create 'root' object");
-        return false;
-    }
-
-    char *json = NULL;
-    bool result = false;
-    time_t applied_at = time(NULL);
-
-    if (!cJSON_AddNumberToObject(root, "schemaVersion", 1) ||
-        !cJSON_AddStringToObject(root, "profileName", name) ||
-        !cJSON_AddBoolToObject(root, "isPreset", is_preset) ||
-        !cJSON_AddNumberToObject(root, "appliedAt", (double)applied_at)) {
-            LOG_ERROR("Failed to populate last applied object");
-            goto cleanup;
-        }
-
-    json = cJSON_Print(root);
-    
-    if (!json) {
-        goto cleanup;
-    }
-
-    if (!utils_write_file(last_applied_path, json)) {
-        goto cleanup;
-    }
-
-    result = true;
-
-cleanup:
-    if (json) {
-        cJSON_free(json);
-    }
-
-    cJSON_Delete(root);
-
-    return result;
-}
-
-
-bool profile_load_last_applied(unifi_last_applied_profile_t *out) {
-    if (!out) {
-        LOG_ERROR("Invalid parameters: out=%p", (void*)out);
-        return false;
-    }
-
-    char path[PATH_MAX];
-    if (!utils_build_path(path, sizeof(path), g_profiles_dir, "/.state/last_applied.json")) {
-        LOG_ERROR("Failed to create path for '%s/.state/last_applied.json", g_profiles_dir);
-        return false;
-    }
-
-    memset((void*)out, 0, sizeof(*out));
-
-    char *json_buffer = NULL;
-
-    if (!utils_read_file(path, &json_buffer, NULL)) {
-        LOG_ERROR("Failed to read the profile file: %s", path);
-        return false;
-    }
-
-    const char *error_ptr = NULL;
-
-    cJSON *root = cJSON_ParseWithOpts(json_buffer, &error_ptr, false);
-
-    if (!root) {
-        LOG_ERROR("JSON parsing error in %s before: %s", path, error_ptr ? error_ptr : "(unknown position)");
-        free(json_buffer);
-        return false;
-    }
-
-    free(json_buffer);
-    json_buffer = NULL;
-
-    const char *profile_name = json_get_string(root, "profileName");
-
-    if (profile_name) {
-        snprintf(out->profile_name, sizeof(out->profile_name), "%s", profile_name);
-    }
-
-    bool is_preset = false;
-    if(json_get_bool(root, "isPreset", &is_preset)) {
-       out->is_preset = is_preset; 
-    }
-
-    double applied_at = 0;
-    if (json_get_double(root, "appliedAt", &applied_at)) {
-        out->appied_at = (time_t)applied_at;
-    }
-
-    if (out->profile_name[0] == '\0') {
-        cJSON_Delete(root);
-        return false;
-    }
-
-    cJSON_Delete(root);
-
     return true;
 }
 

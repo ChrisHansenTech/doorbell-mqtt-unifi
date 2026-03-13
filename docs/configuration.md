@@ -31,6 +31,9 @@ Environment variables override JSON values for supported settings. Configuration
     "user": "ubnt",
     "password_env": "UNIFI_PROTECT_RECOVERY_CODE"
   },
+  "unifi": {
+    "apply_method": "ipc"
+  }
   "presets": [
     { "name": "Christmas", "directory": "christmas" },
     { "name": "New Years", "directory": "new_years" },
@@ -40,7 +43,7 @@ Environment variables override JSON values for supported settings. Configuration
 }
 ```
 
-# MQTT Section
+## MQTT Section
 
 ### mqtt.host
 
@@ -167,34 +170,76 @@ Passphrase used to decrypt the private key if the key file is encrypted.
 
 Recommendation: set via environment variable if used.
 
-# MQTT Namespacing
+## MQTT Namespacing
 
 These keys are supported by the loader (even though they aren’t shown in the shipped `config.json`).
 
+They control how the service identifies itself in MQTT and Home Assistant. Proper configuration is important when running multiple doorbells.
+
 ### mqtt.prefix
 
-Env: `MQTT_PREFIX`  
+Env: `MQTT_PREFIX`
 Default: `chrishansentech`
 
-Base prefix used for MQTT topics.
+Base prefix used for all MQTT topics published by the service.
+
+Example topic structure:
+
+```
+<prefix>/doorbell-mqtt-unifi/<instance>/...
+```
+
+Most users do not need to change this.
+
 
 ### mqtt.instance
 
-Env: `MQTT_INSTANCE`  
+Env: `MQTT_INSTANCE`
 Default: `default`
 
-Instance name used for namespacing topics (helpful if running multiple doorbells/services).
+Logical instance name used for:
 
-### mqtt.client_id
+- MQTT topic namespacing
+- MQTT client ID generation
+- Home Assistant discovery identifiers
+- Home Assistant device name
+- Entity unique IDs
 
-Env: `MQTT_CLIENT_ID`  
-Default: computed
+This allows multiple doorbells to run as separate containers without conflicts.
 
-If not set, the service generates:
+For example:
 
-`<prefix>-doorbell-mqtt-unifi-<instance>`
+```
+MQTT_INSTANCE=front_door
+MQTT_INSTANCE=back_door
+MQTT_INSTANCE=garage
+```
 
-# SSH Section
+Each instance will appear as a separate device in Home Assistant.
+
+A human-readable version of the instance name is automatically generated for display in Home Assistant:
+
+- Dashes (`-`) and underscores (`_`) are replaced with spaces
+- The first letter of each word is capitalized
+
+Example:
+
+```
+MQTT_INSTANCE=front_door
+```
+
+Will display as:
+
+```
+UniFi Doorbell MQTT Service (Front Door)
+```
+
+The raw instance value is always used for machine identifiers and unique IDs. Only the display name is formatted.
+
+Important:
+Changing `mqtt.instance` after initial setup will create a new device in Home Assistant
+
+## SSH Section
 
 ### ssh.host
 
@@ -230,7 +275,55 @@ Example:
 -e UNIFI_PROTECT_RECOVERY_CODE="your_password_here"
 ```
 
-# Presets Section
+## UniFi Configuration
+
+These settings control how changes are applied to the doorbell.
+
+### unifi.apply_method
+
+Env: `UNIF_APPLY_METHOD`  
+Default: `legacy` (when upgrading from versions prior to v0.2.0)  
+Default: `IPC` (new installs of v0.2.0 and later)
+
+Controls the method used to apply animations and sounds to the doorbell.
+
+Behavior by version:
+
+- If upgrading from a version prior to **v0.2.0** and the `unifi` section does not exist in `config.json`, 
+  the service defaults to `legacy` to avoid changing existing behavior.
+- For new installations of **v0.2.0+**, the default is `IPC`.
+- The method can always be overridden using the `UNIF_APPLY_METHOD` environment variable.    
+
+#### legacy
+
+Legacy file-based apply method.
+
+The service:
+
+1. Downloads the current `.conf` files from the doorbell
+2. Patches them with your configured changes
+3. Uploads the updated files
+4. Restarts the related doorbell processes to reload configuration
+
+This method is compatible with existing setups, but is slower. Updates typically take **~30 seconds**.
+
+#### IPC
+
+Fast in-memory apply method using inter-process communication.
+
+The service:
+
+1. Uploads IPC message payloads (for `customAnimations` and `customSounds`)
+2. Sends IPC commands to update the doorbell’s in-memory configuration (no process restarts)
+
+This method is significantly faster. Updates typically take **< 2 seconds**.
+
+Notes:
+
+- `IPC` is recommended for improved responsiveness and access to newer features.
+- Some advanced features may require `IPC` and will be unavailable when using `legacy`.
+
+## Presets Section
 
 Presets define the named profiles users can select, and the directory containing assets for each preset.
 
@@ -256,6 +349,89 @@ Required
 Directory name for the preset’s asset bundle.
 
 Keep it filesystem-friendly (lowercase + underscores recommended).
+
+## SFX section
+
+The `sfx` section enables ad-hoc sound playback using the doorbell’s existing `playSound.sh`.
+
+Unlike profile-based ring sounds, SFX playback:
+
+- Does not modify Protect configuration
+- Does not require reboot or process restart
+- Is executed immediately via SSH
+
+### Example
+
+{
+  "sfx": {
+    "presets": [
+      {
+        "name": "Hello",
+        "file": "hello.ogg",
+        "volume": 100
+      },
+      {
+        "name": "Chime",
+        "file": "chime.wav"
+      }
+    ],
+    "defaultVolume": 75
+  }
+}
+
+### sfx.presets[]
+
+Defines named sound effects selectable from Home Assistant.
+
+#### name
+
+Required  
+Display name shown in Home Assistant.
+
+Must be unique (case-insensitive).
+
+#### file
+
+Required  
+Filename under the `/sounds` bind mount.
+
+Only files inside `/sounds` are allowed.
+
+Supported formats:
+
+- `.ogg`
+- `.wav`
+
+#### volume
+
+Optional  
+If defined and > 0, this value overrides `defaultVolume` for the preset.
+
+If missing or `0`, `defaultVolume` is used.
+
+## sfx.defaultVolume
+
+Range: `0–100`  
+Default: `100`
+
+Global fallback volume used when a preset does not specify its own volume.
+
+## Runtime Behavior
+
+When a preset is selected:
+
+1. The service validates the preset.
+2. The file path is resolved under `/sounds`.
+3. The file is uploaded to:
+
+   `/tmp/doorbell-mqtt-unifi/sfx/`
+
+4. The following command is executed:
+
+   `playSound.sh <file> -v <volume>`
+
+5. The temporary file is removed.
+
 
 ## Quick “what must I set?” checklist
 

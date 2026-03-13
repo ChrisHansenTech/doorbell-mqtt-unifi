@@ -99,6 +99,15 @@ void status_set_preset_selected(const char *preset) {
     mqtt_publish(buffer, preset, 1, 1);
 }
 
+void status_set_sfx_preset_selected(const char *preset) {
+    char buffer[255];
+
+    ha_build_topic(buffer, sizeof(buffer), "sfxpreset/selected");
+
+    mqtt_publish(buffer, preset, 1, 1);
+}
+
+
 void status_set_custom_directory(const char *directory) {
     char buffer[255];
 
@@ -141,12 +150,48 @@ void status_set_last_download(const char *directory, const char *path, const cha
     cJSON_Delete(root);
 }
 
+void status_set_validate_profile(const char *state, const char *profile, const char *expected_hash, const char *applied_hash, const char *timestamp) {
+    if (!state || !profile || !expected_hash || !applied_hash || !timestamp) {
+        LOG_ERROR("Invalid parameters: state=%p, profile=%p, expected_hash=%p, applied_hash=%p, timestamp=%p", (void*)state, (void*)profile, (void*)expected_hash, (void*)applied_hash, (void*)timestamp);
+        return;
+    }
+
+    char state_topic[256];
+    ha_build_topic(state_topic, sizeof(state_topic), "profile_validation");
+    mqtt_publish(state_topic, state, 1, 1);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        LOG_WARN("Failed to allocate cJSON object for 'profile_validation/attributes'");
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "profile", profile);
+    cJSON_AddStringToObject(root, "expected_hash", expected_hash);
+    cJSON_AddStringToObject(root, "applied_hash", applied_hash);
+    cJSON_AddStringToObject(root, "last_validated", timestamp);
+
+    char *json = cJSON_PrintUnformatted(root);
+    
+    if (json) {
+        char json_topic[256];
+        ha_build_topic(json_topic, sizeof(json_topic), "profile_validation/attributes");
+        mqtt_publish(json_topic, json, 1, 1);
+
+        cJSON_free(json);
+    } else {
+        LOG_WARN("Failed to serialize 'profile_validation/attributes' JSON.");
+    }
+
+    cJSON_Delete(root);
+}
+
 void status_set_availability(bool available) {
 
     char buffer[255];
     ha_build_topic(buffer, sizeof(buffer), "availability");
 
-    mqtt_publish(buffer, available ? "online" : "fffline", 1, 1);
+    mqtt_publish(buffer, available ? "online" : "offline", 1, 1);
 
     return;
 }

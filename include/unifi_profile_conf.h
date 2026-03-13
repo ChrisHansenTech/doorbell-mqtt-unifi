@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cJSON.h"
 #include "unifi_profile.h"
 #include <stdbool.h>
 
@@ -44,3 +45,19 @@ bool unifi_profile_patch_lcm_gui_conf(const char *in_path, const char *out_path,
  * @return false 
  */
 bool unifi_profile_patch_sounds_leds_conf(const char *in_path, const char *out_path, const unifi_profile_t *desired);
+
+/**
+ * @brief Build a custom animations array from a profile.
+ * 
+ * @param profile 
+ * @return cJSON* 
+ */
+cJSON *unifi_profile_build_custom_animations_array(const unifi_profile_t *profile);
+
+/**
+ * @brief Build a custom sounds array from a profile.
+ * 
+ * @param profile 
+ * @return cJSON* 
+ */
+cJSON *unifi_profile_build_custom_sounds_array(const unifi_profile_t *profile);

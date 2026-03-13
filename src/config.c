@@ -205,6 +205,26 @@ static bool config_load_ssh(config_ssh_t *ssh_cfg, const cJSON *root) {
     return true;
 }
 
+static bool config_load_unifi(config_unifi_t *unifi_cfg, const cJSON *unifi) {
+    char type[30];
+
+    if (!cfg_set_str_from_env_json_default(type, sizeof(type), unifi, "apply_method", "UNIFI_APPLY_METHOD", "IPC", "unifi.apply_method", false)) {
+        return false;
+    }
+
+    if (strcasecmp(type, "legacy") == 0) {
+        unifi_cfg->apply_method = UNIFI_APPLY_LEGACY;
+        return true;
+    }
+
+    if (strcasecmp(type, "ipc") == 0) {
+        unifi_cfg->apply_method = UNIFI_APPLY_IPC;
+        return true;
+    }
+
+    return false;
+}
+
 static void config_load_presets(config_preset_t *preset_cfg, const cJSON *presets) {
     if(!preset_cfg || !presets) {
         return;
@@ -232,16 +252,21 @@ static void config_load_presets(config_preset_t *preset_cfg, const cJSON *preset
         const char *directory = json_get_string(item, "directory");
         
         if (!name || !directory) {
-            LOG_ERROR("Invalid preset entry at index %ld (missing name or directory).", i);
-            goto fail;
+            LOG_WARN("Invalid preset entry at index %ld (missing name or directory).", i);
+            continue;
+        }
+
+        if (!utils_is_valid_directory_name(directory)) {
+            LOG_WARN("Invalid preset directory name '%s' for preset '%s'", directory, name);
+            continue;
         }
         
         char *key_name = json_strdup_normalized(item, "name");
 
         if (preset_key_exists(items, out, key_name)) {
-            LOG_ERROR("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
+            LOG_WARN("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
             free(key_name);
-            goto fail;
+            continue;
         }
 
         char *display_name = strdup(name);
@@ -275,6 +300,115 @@ fail:
     preset_cfg->items = NULL;
     preset_cfg->count = 0;
     return;
+}
+
+static bool sfx_preset_key_exists(const config_sfx_preset_item_t *items, size_t count, const char *key) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(items[i].key_name, key) == 0) return true;
+    }
+    return false;
+}
+
+static void config_load_sfx_presets(config_sfx_preset_t *sfx_cfg, const cJSON *presets) {
+    if(!sfx_cfg || !presets) {
+        return;
+    }
+
+    sfx_cfg->items = NULL;
+    sfx_cfg->count = 0;
+
+    size_t count = cJSON_GetArraySize(presets);
+
+    if (count <= 0) {
+        LOG_WARN("No presets configured in the 'sfx.presets' section");
+        return;
+    }
+
+    config_sfx_preset_item_t *items = calloc((size_t)count, sizeof(config_sfx_preset_item_t));
+    if (!items) {
+        LOG_ERROR("Out of memory allocating sfx preset mappings (count=%zu)", count);
+        return;
+    }
+
+    size_t i = 0, out = 0;
+    for (cJSON *item = presets->child; item && i < count; item = item->next, i++) {
+        const char *name = json_get_string(item, "name");
+        const char *file = json_get_string(item, "file");
+        
+        int volume = 0;
+        if (!json_get_int(item, "volume", &volume) || volume <= 0 || volume > 100) {
+            volume = sfx_cfg->default_volume;
+        }
+        
+        if (!name || !file) {
+            LOG_WARN("Invalid sfx preset entry at index %ld (missing name or file).", i);
+            continue;
+        }
+
+        if (!utils_is_valid_filename(file, UTILS_FILE_CLASS_SOUND)) {
+            LOG_WARN("Invalid file '%s' in SFX preset '%s'", file, name);
+            continue;
+        }
+        
+        char *key_name = json_strdup_normalized(item, "name");
+
+        if (sfx_preset_key_exists(items, out, key_name)) {
+            LOG_WARN("Duplicate preset name (case/space-insensitive) '%s' at index %zu", name, i);
+            free(key_name);
+            continue;
+        }
+
+        char *display_name = strdup(name);
+        char *filename = strdup(file);
+        if (!display_name || !filename) {
+            free(key_name);
+            LOG_ERROR("Out of memory duplicating sfx preset mapping at index %zu", i);
+            goto fail;
+        }
+
+        items[out].name = display_name;
+        items[out].key_name = key_name;
+        items[out].file = filename;
+        items[out].volume = volume;
+        out++;
+    }
+
+    sfx_cfg->items = items;
+    sfx_cfg->count = out;
+
+    LOG_INFO("Loaded %ld sfx preset mappings from configuration.", sfx_cfg->count);
+    return;
+
+fail:
+    for (size_t j = 0; j < out; j++) {
+        free(items[j].name);
+        free(items[j].key_name);
+        free(items[j].file);
+    }
+    free(items);
+
+    sfx_cfg->items = NULL;
+    sfx_cfg->count = 0;
+    return;
+
+
+}
+
+static bool config_load_sfx(config_sfx_preset_t *sfx_cfg, const cJSON *sfx) {
+    if (!sfx_cfg || !sfx) {
+        return false;
+    }
+
+    sfx_cfg->default_volume = cfg_get_int_from_env_json_default(sfx, "defaultVolume", "SFX_DEFAULT_VOLUME", 100);
+
+    cJSON *presets = cJSON_GetObjectItem(sfx, "presets");
+
+    if (presets && cJSON_IsArray(presets)) {
+        config_load_sfx_presets(sfx_cfg, presets);
+    }
+
+    return true;
+    
 }
 
 bool config_load(const char *filename, config_t *cfg) {
@@ -315,6 +449,30 @@ bool config_load(const char *filename, config_t *cfg) {
         return false;
     }
 
+    cJSON *unifi = cJSON_GetObjectItem(root, "unifi");
+
+    if (unifi) {
+        if (!cJSON_IsObject(unifi)) {
+            LOG_ERROR("'unifi' must be an object in '%s'", filename);
+            cJSON_Delete(root);
+            return false;
+        }
+    } else {
+        LOG_WARN("Missing 'unifi' section in '%s'. Defaulting to 'legacy' apply method", filename);
+        
+        unifi = cJSON_AddObjectToObject(root, "unifi");
+        if (!unifi) {
+            LOG_ERROR("Failed to create default 'unifi' object");
+            cJSON_Delete(root);
+            return false;
+        }
+
+        cJSON_AddStringToObject(unifi, "apply_method", "legacy");
+    }
+
+    if (!config_load_unifi(&cfg->unifi_cfg, unifi)) {
+        return false;
+    }
 
     cJSON *ssh = cJSON_GetObjectItem(root, "ssh");
     if (!ssh || !cJSON_IsObject(ssh)) {
@@ -329,12 +487,21 @@ bool config_load(const char *filename, config_t *cfg) {
 
     cJSON *presets = cJSON_GetObjectItem(root, "presets");
     if (!presets || !cJSON_IsArray(presets)) {
-        LOG_ERROR("Missing or invalid 'presets' section in '%s'", filename);
-        cJSON_Delete(root);
-        return false;
+        LOG_WARN("Missing or invalid 'presets' section in '%s'", filename);
+        presets = cJSON_AddArrayToObject(root, "presets");
     }
 
     config_load_presets(&cfg->preset_cfg, presets);
+
+    cJSON *sfx = cJSON_GetObjectItem(root, "sfx");
+    if (!sfx || !cJSON_IsObject(sfx)) {
+        LOG_WARN("Missing or invalid 'sfx' section in '%s'.", filename);
+        sfx = cJSON_AddObjectToObject(root, "sfx");
+        cJSON_AddNumberToObject(sfx, "defaultVolume", 100);
+        cJSON_AddArrayToObject(sfx, "presets");
+    }
+
+    config_load_sfx(&cfg->sfx_preset_cfg, sfx);
 
     cJSON_Delete(root);
 
@@ -357,4 +524,15 @@ void config_free(config_t *cfg) {
 
     cfg->preset_cfg.items = NULL;
     cfg->preset_cfg.count = 0;
+
+    for (size_t i = 0; i < cfg->sfx_preset_cfg.count; i++) {
+        free(cfg->sfx_preset_cfg.items[i].name);
+        free(cfg->sfx_preset_cfg.items[i].key_name);
+        free(cfg->sfx_preset_cfg.items[i].file);
+    }
+
+    free(cfg->sfx_preset_cfg.items);
+
+    cfg->sfx_preset_cfg.items = NULL;
+    cfg->sfx_preset_cfg.count = 0;
 }

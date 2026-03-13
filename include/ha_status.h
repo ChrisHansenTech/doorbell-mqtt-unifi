@@ -46,6 +46,14 @@ void status_set_last_applied_profile(const char *profile);
 void status_set_preset_selected(const char *preset);
 
 /**
+ * @brief Set the currently selected SFX preset. This is used for informational purposes and does not 
+ *        necessarily need to match the name of any actual SFX preset on the device.
+ * 
+ * @param preset 
+ */
+void status_set_sfx_preset_selected(const char *preset);
+
+/**
  * @brief Set the custom profile directory. This is used for informational purposes and does not 
  *        necessarily need to match any actual directory.
  * 
@@ -63,6 +71,19 @@ void status_set_custom_directory(const char *directory);
  * @param timestamp 
  */
 void status_set_last_download(const char *directory, const char *path, const char *timestamp);
+
+/**
+ * @brief Set the result of profile validation, including the validation state, the profile that was validated,
+ *        the expected and applied hashes, and a timestamp. This is used for informational purposes and does not 
+ *        necessarily need to match any actual profile or timestamp.
+ * 
+ * @param state 
+ * @param profile 
+ * @param expected_hash 
+ * @param applied_hash 
+ * @param timestamp 
+ */
+void status_set_validate_profile(const char *state, const char *profile, const char *expected_hash, const char *applied_hash, const char *timestamp);
 
 /**
  * @brief Set the availability status.

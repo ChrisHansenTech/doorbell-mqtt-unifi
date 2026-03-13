@@ -93,7 +93,7 @@ CFLAGS  ?= $(CSTD) $(WARN) $(GENDEP) $(INCLUDES) $(PAHO_CFLAGS) $(SSH2_CFLAGS)
 # Allow CI/Docker to append flags without clobbering defaults
 CFLAGS  += $(EXTRA_CFLAGS)
 LDFLAGS ?=
-LDLIBS  ?= $(PAHO_LIBS) $(SSH2_LIBS) -lpthread
+LDLIBS  ?= $(PAHO_LIBS) $(SSH2_LIBS) -lpthread -lcrypto
 
 # ===== Phony targets =====
 .PHONY: all release debug run clean distclean print dirs test test-bin

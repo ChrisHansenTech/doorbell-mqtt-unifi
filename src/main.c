@@ -4,6 +4,7 @@
 #include "config_types.h"
 #include "ha_mqtt.h"
 #include "logger.h"
+#include "migration.h"
 #include "mqtt.h"
 #include "mqtt_router.h"
 #include "ha_topics.h"
@@ -17,6 +18,8 @@
 
 #define DEFAULT_CONFIG_PATH   "/config/config.json"
 #define DEFAULT_PROFILES_DIR  "/profiles"
+#define DEFAULT_SOUNDS_DIR    "/sounds"
+#define DEFAULT_STATE_DIR     "/config/state"
 
 static volatile int running = 1;
 static void handle_signal(int sig) {
@@ -32,15 +35,27 @@ int main(void) {
 
     print_banner();
 
-    const char *config_path = getenv("CONFIG_PATH");
+    const char *config_path = getenv("DOORBELL_CONFIG_PATH");
     if (!config_path) {
         config_path = DEFAULT_CONFIG_PATH;
     }
 
-    const char *profiles_dir = getenv("PROFILES_DIR");
+    const char *state_dir = getenv("DOORBELL_STATE_DIR");
+    if (!state_dir) {
+        state_dir = DEFAULT_STATE_DIR;
+    }
+
+    const char *profiles_dir = getenv("DOORBELL_PROFILES_DIR");
     if (!profiles_dir) {
         profiles_dir = DEFAULT_PROFILES_DIR;
     }
+
+    const char *sounds_dir = getenv("DOORBELL_SOUNDS_DIR");
+    if (!sounds_dir) {
+        sounds_dir = DEFAULT_SOUNDS_DIR;
+    }
+
+    migration_run(profiles_dir, sounds_dir, state_dir);
 
     if (!utils_delete_directory("/tmp/doorbell-mqtt-unifi")) {
         LOG_WARN("Did not clean '/tmp/doorbell-mqtt-unifi'");
@@ -65,7 +80,7 @@ int main(void) {
 
     ha_topics_init(&cfg);
 
-    if (!ha_mqtt_bind(&cfg)) {
+    if (!ha_mqtt_bind(&cfg, state_dir)) {
         LOG_FATAL("Home Assistant MQTT bind failed. Exiting.");
         rc = 1;
         goto cleanup;
@@ -79,9 +94,16 @@ int main(void) {
 
     mqtt_initialized = true;
 
+    sfx_ctx_t sfx_ctx;
+    sfx_ctx.sfx_preset_cfg = &cfg.sfx_preset_cfg;
+    sfx_ctx.sounds_dir = sounds_dir;
+
     mqtt_router_ctx_t inbound_ctx;
     inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
     inbound_ctx.preset_cfg = &cfg.preset_cfg;
+    inbound_ctx.unifi_cfg = &cfg.unifi_cfg;
+    inbound_ctx.sfx_ctx = &sfx_ctx;
+    inbound_ctx.state_dir = state_dir;
 
     if (!mqtt_router_start(&inbound_ctx)) {
         LOG_FATAL("MQTT inbound worker failed to start. Exiting.");

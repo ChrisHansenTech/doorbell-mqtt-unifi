@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set image name
         run: |
@@ -42,15 +45,27 @@ jobs:
 
       - name: Derive version
         run: |
+          SHORTSHA="$(git rev-parse --short HEAD)"
+      
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
+            LAST_TAG="manual"
           else
-            SHORTSHA="$(git rev-parse --short HEAD)"
-            VERSION="0.0.0-dev+${SHORTSHA}"
+            LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")"
+            LAST_TAG="${LAST_TAG#v}"
+      
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$LAST_TAG"
+            NEXT_MINOR=$((MINOR + 1))
+      
+            VERSION="${MAJOR}.${NEXT_MINOR}.0-dev+${SHORTSHA}"
           fi
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          echo "SHORTSHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
+      
+          echo "Resolved LAST_TAG=${LAST_TAG}"
+          echo "Resolved VERSION=${VERSION}"
+      
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "SHORTSHA=${SHORTSHA}" >> "$GITHUB_ENV"
+      
       - name: Run tests
         run: |
           make clean
@@ -78,7 +93,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ env.VERSION }}
           tags: |
-            ghcr.io/${{ env.IMAGE }}:dev
-            ghcr.io/${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
+            ${{ env.IMAGE }}:dev
+            ${{ env.IMAGE }}:sha-${{ env.SHORTSHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -2,6 +2,11 @@
 
 #include <stddef.h>
 
+typedef enum {
+    UNIFI_APPLY_LEGACY = 0,
+    UNIFI_APPLY_IPC
+} unifi_apply_method_t;
+
 typedef struct {
     char address[256];
     char client_id[256];
@@ -42,7 +47,27 @@ typedef struct {
 } config_preset_t;
 
 typedef struct {
+    char *name;
+    char *key_name;
+    char *file;
+    char *dir;
+    int volume;
+} config_sfx_preset_item_t;
+
+typedef struct {
+    config_sfx_preset_item_t *items;
+    size_t count;
+    int default_volume;
+} config_sfx_preset_t;
+
+typedef struct {
+    unifi_apply_method_t apply_method;
+} config_unifi_t;
+
+typedef struct {
     config_mqtt_t mqtt_cfg;
     config_ssh_t ssh_cfg;
     config_preset_t preset_cfg;
+    config_sfx_preset_t sfx_preset_cfg;
+    config_unifi_t unifi_cfg;
 } config_t;
