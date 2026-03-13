@@ -79,7 +79,7 @@ If upgrading from a version prior to v0.2.0 and the `unifi` section does not exi
 You can override the method at any time:
 
 ```
-UNIF_APPLY_METHOD=IPC
+UNIFI_APPLY_METHOD=IPC
 ```
 
 ## Multi‑Doorbell Support
