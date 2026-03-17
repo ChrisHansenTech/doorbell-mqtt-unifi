@@ -69,18 +69,46 @@ void status_set_error(error_code_t code, const char *message_override) {
 bool status_error_changed(error_code_t code, const char *message)
 {
     if (!message) {
-        return true;
+        return false;
     }
 
-    if ((int)code != g_last_error_code) {
-        return true;
-    }
-
-    if (strcmp(message, g_last_error_message) != 0) {
+    if ((int)code != g_last_error_code || strcmp(message, g_last_error_message) != 0) {
+        g_last_error_code = code;
+        strncpy(g_last_error_message, message, sizeof(g_last_error_message) - 1);
         return true;
     }
 
     return false;
+}
+
+void status_clear_error(void) {
+    const char *name = error_code_name(ERROR_NONE);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        LOG_ERROR("Failed to allocate cJSON object for last_error.");
+        return;
+    }
+
+    cJSON_AddNumberToObject(root, "code", ERROR_NONE);
+    cJSON_AddStringToObject(root, "name", name);
+    cJSON_AddStringToObject(root, "message", "");
+
+    char *json = cJSON_PrintUnformatted(root);
+    
+    if (json) {
+        char topic[256];
+        ha_build_topic(topic, sizeof(topic), "last_error");
+        mqtt_publish(topic, json, 1, 1);
+    } else {
+        LOG_ERROR("Failed to serialize last_error JSON.");
+    }
+
+    g_last_error_code = 0;
+    g_last_error_message[0] = '\0';
+
+    cJSON_free(json);
+    cJSON_Delete(root);
 }
 
 void status_set_last_applied_profile(const char *profile) {

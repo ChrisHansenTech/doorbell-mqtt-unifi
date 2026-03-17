@@ -70,6 +70,8 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
 
     ok = true;
 
+    status_clear_error();
+
 cleanup: 
     if (session) {
         ssh_session_destroy(session);
@@ -140,6 +142,8 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
 
     ok = true;
 
+    status_clear_error();
+
 cleanup: 
     if (session) {
         ssh_session_destroy(session);
@@ -206,6 +210,8 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload, 
     goto cleanup;
   }
 
+  status_clear_error();
+
 cleanup:
   if (session) {
     ssh_session_destroy(session);
@@ -271,6 +277,7 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
      
+    status_clear_error();
 
 cleanup: 
     if (session) {
@@ -315,6 +322,8 @@ void command_play_sfx_preset(const mqtt_router_ctx_t *ctx, const char *payload, 
         HA_ERR(rc, "Failed to upload and play SFX");
         goto cleanup;
     }
+
+    status_clear_error();
 
 cleanup:
     if (session) {

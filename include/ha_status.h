@@ -27,7 +27,19 @@ void status_set_status_message(const char *topic, const char *message);
  */
 void status_set_error(error_code_t code, const char *message_override);
 
+/**
+ * @brief Check if the error code or message has changed since the last time it was set. This can be used to avoid redundant logging.
+ * 
+ * @param code 
+ * @param message 
+ * @return true if the error code or message has changed, false otherwise
+ */
 bool status_error_changed(error_code_t code, const char *message);
+
+/**
+ * @brief Clear the current error state, setting the error code to 0 and the message to an empty string.
+ */
+void status_clear_error(void);
 
 /**
  * @brief  Set the name of the last applied profile. This is used for informational purposes
