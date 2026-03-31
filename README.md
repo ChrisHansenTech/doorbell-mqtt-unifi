@@ -16,6 +16,16 @@ Designed for reliability, speed, and clean Home Assistant integration.
 > - `:latest` → Stable release  
 > - `:dev` → Development/nightly build (may contain bugs)
 
+## Device Support
+
+**Supported:**
+- UniFi G4 Doorbell Pro
+
+**Not Supported:**
+- UniFi G4 Doorbell Lite (no screen)
+- UniFi G6 Entry (no screen)
+- UniFi G6 Entry Pro (touchscreen)
+
 ## Why Use It?
 
 - Apply animation & sound changes in under 2 seconds (IPC mode)
