@@ -1,5 +1,6 @@
 #include "config.h"
 #include "config_types.h"
+#include "errors.h"
 #include "logger.h"
 #include "utils.h"
 
@@ -345,7 +346,8 @@ static void config_load_sfx_presets(config_sfx_preset_t *sfx_cfg, const cJSON *p
             continue;
         }
 
-        if (!utils_is_valid_filename(file, UTILS_FILE_CLASS_SOUND)) {
+        error_return_t err = utils_is_valid_filename(file, UTILS_FILE_CLASS_SOUND);
+        if (err.error_code != ERROR_NONE) {
             LOG_WARN("Invalid file '%s' in SFX preset '%s'", file, name);
             continue;
         }

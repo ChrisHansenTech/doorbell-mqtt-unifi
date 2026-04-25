@@ -1,5 +1,6 @@
 #pragma once
 
+#include "errors.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <time.h>
@@ -128,23 +129,23 @@ bool utils_is_valid_directory_name(const char *name);
 
 /**
  * @brief Check if a filename is valid for the given file class.
- * 
+ *
  * @param name filename to check
  * @param cls file class to check against
- * @return true if the filename is valid for the file class
- * @return false if the filename is not valid for the file class
+ * @return error_t ERROR_NONE if the filename is valid for the file class
+ * @return error_t specific error code if invalid
  */
-bool utils_is_valid_filename(const char *name, utils_file_class_t cls);
+error_return_t utils_is_valid_filename(const char *name, utils_file_class_t cls);
 
 /**
- * @brief Check if a file at the given path is valid for the given file class.
+ * @brief Check if the file is valid for the give file class.
  * 
- * @param full_path full file path to check
+ * @param full_path full path to the file
  * @param cls file class to check against
- * @return true if the file is valid for the file class
- * @return false if the file is not valid for the file class
+ * @return error_t ERROR_NONE if the filename is valid for the file class
+ * @return error_t specific error code and message if invalid
  */
-bool utils_is_valid_file(const char *full_path, utils_file_class_t cls);
+error_return_t utils_is_valid_file(const char *full_path, utils_file_class_t cls);
 
 /**
  * @brief Copy the contents of one file to another.

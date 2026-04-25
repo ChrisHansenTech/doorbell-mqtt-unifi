@@ -33,6 +33,8 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
     unifi_profile_t profile;
     unifi_ipc_raw_t ipc_state = {0};
     profile_state_t profile_state = {0};
+    error_return_t result = {0};
+    int rc = 0;
 
     if (!profiles_repo_resolve_preset(payload, profile_path, sizeof(profile_path))) {
         HA_ERRF(ERROR_PROFILE_NOT_FOUND, "Profile directory for preset '%s' not found", payload);
@@ -50,9 +52,9 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
-    if (rc != ERROR_NONE) {
-        HA_ERR(rc, "Failed to upload and apply profile");
+    result = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
+    if (result.error_code != ERROR_NONE) {
+        HA_ERR(result.error_code, result.message);
         goto cleanup;
     }
 
@@ -101,6 +103,8 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
     unifi_profile_t profile;
     unifi_ipc_raw_t ipc_state = {0};
     profile_state_t profile_state = {0};
+    error_return_t result = {0};
+    int rc = 0;
 
     if (!utils_build_path(profile_path, sizeof(profile_path), "./profiles", payload)) {
         goto cleanup;
@@ -122,9 +126,9 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
         goto cleanup;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
-    if (rc != ERROR_NONE) {
-        HA_ERR(rc, "Failed to upload and apply profile");
+    result = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
+    if (result.error_code != ERROR_NONE) {
+        HA_ERR(result.error_code, result.message);
         goto cleanup;
     }
 
@@ -245,6 +249,8 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
     unifi_profile_t profile;
     unifi_ipc_raw_t ipc_state = {0};
     profile_state_t profile_state = {0};
+    error_return_t result = {0};
+    int rc = 0;
 
     if (!unifi_profile_load_from_file(profile_path, &profile)) {
         HA_ERR(ERROR_PROFILE_INVALID, "Error loading profile.json for test");
@@ -257,9 +263,9 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         return;
     }
 
-    int rc = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
-    if (rc != ERROR_NONE) {
-        HA_ERR(rc, "Failed to upload and apply profile");
+    result = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
+    if (result.error_code != ERROR_NONE) {
+        HA_ERR(result.error_code, result.message);
         goto cleanup;
     }
 
@@ -317,9 +323,9 @@ void command_play_sfx_preset(const mqtt_router_ctx_t *ctx, const char *payload, 
         return;
     }
 
-    int rc = unifi_sfx_upload_and_play(session, sfx, ctx->sfx_ctx->sounds_dir);
-    if (rc != ERROR_NONE) {
-        HA_ERR(rc, "Failed to upload and play SFX");
+    error_return_t result = unifi_sfx_upload_and_play(session, sfx, ctx->sfx_ctx->sounds_dir);
+    if (result.error_code != ERROR_NONE) {
+        HA_ERR(result.error_code, result.message);
         goto cleanup;
     }
 

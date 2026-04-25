@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "errors.h"
 #include "logger.h"
 
 #include "md5.h"
@@ -194,7 +195,7 @@ bool utils_directory_exists(const char *path) {
 
 bool utils_build_path(char *out, size_t out_len, const char *base, const char *child) {
     if (!out || !base || !child) {
-        LOG_ERROR("Invalid parameters: out=%p out_len=%ld, base=%p, child=%p", (void*)out, out_len, (void*)base, (void*)child);
+        LOG_ERROR("Invalid parameters: out=%p out_len=%zu, base=%p, child=%p", (void*)out, out_len, (void*)base, (void*)child);
         return false;
     }
     
@@ -492,42 +493,42 @@ bool utils_is_valid_directory_name(const char *name) {
 }
 
 
-bool utils_is_valid_filename(const char *name, utils_file_class_t cls) {
+error_return_t utils_is_valid_filename(const char *name, utils_file_class_t cls) {
     if (!name) {
-        return false;
+         return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
     
     if (!utils_is_safe_single_segment(name)) {
-        return false;
+        return error_create(ERROR_FILENAME_INVALID, "Filename is unsafe");
     } 
 
     if (!utils_ext_allowed_for_class(name, cls)) {
-        return false;
+        return error_create(ERROR_FILE_EXTENSION_INVALID, "Invalid file extension");
     }
 
-    return true;
+    return error_none();
 }
 
-bool utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
+error_return_t utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
     if (!full_path || full_path[0] == '\0') {
-        return false;
+        return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
 
     // Must exist, be a regular file, and non-empty
     struct stat st;
     if (stat(full_path, &st) != 0) {
         LOG_WARN("stat failed for '%s': %s (errno=%d)", full_path, strerror(errno), errno);
-        return false;
+        return error_createf(ERROR_FILE_TYPE_INVALID, "Invalid file %s", strerror(errno));
     }
 
     if (!S_ISREG(st.st_mode)) {
         LOG_ERROR("Path '%s' exists but is not a regular file (mode=0%o)", full_path, st.st_mode);
-        return false;
+        return error_createf(ERROR_FILE_TYPE_INVALID, "Invalid file %o", st.st_mode);
     }
 
     if (st.st_size <= 0) {
         LOG_ERROR("'%s' is an empty file", full_path);
-        return false;
+        return error_create(ERROR_FILE_TYPE_INVALID, "File is empty");
     }
 
     if (st.st_size > MAX_ASSET_SIZE_BYTES) {
@@ -535,14 +536,14 @@ bool utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
         full_path,
         (size_t)MAX_ASSET_SIZE_BYTES,
         (long long)st.st_size);
-    return false;
+    return error_createf(ERROR_FILE_TYPE_INVALID, "File exceeds max size (%zu bytes)", (size_t)MAX_ASSET_SIZE_BYTES);
 }
 
     // Detect by extension, enforce it matches the caller's class
     detected_type_t t = detect_type_from_ext(full_path);
     if (t == DETECTED_TYPE_NONE) {
         LOG_ERROR("File '%s' does not have a valid asset extension", full_path);
-        return false;
+        return error_create(ERROR_FILE_TYPE_INVALID, "File does not have a valid extension");
     }
 
     if (!detected_type_allowed_for_class(t, cls)) {
@@ -550,14 +551,14 @@ bool utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
             full_path, 
             utils_file_type_to_string(t), 
             utils_file_class_to_string(cls));
-        return false;
+        return error_createf(ERROR_FILE_TYPE_INVALID,"File is not a valid %s file (detected type=%s)", utils_file_type_to_string(t), utils_file_class_to_string(cls));
     }
 
     // Validate magic header
     FILE *f = fopen(full_path, "rb");
     if (!f) {
         LOG_ERROR("Failed to open file '%s' : %s (errno=%d)", full_path, strerror(errno), errno);
-        return false;
+        return error_createf(ERROR_FILE_TYPE_INVALID, "Failed to open file %s", strerror(errno));
     }
 
     bool ok = false;
@@ -577,12 +578,14 @@ bool utils_is_valid_file(const char *full_path, utils_file_class_t cls) {
             break;
     }
 
+    fclose(f);
+
     if (ok == false) {
         LOG_ERROR("File '%s' does not contain a valid %s header.", full_path, utils_file_type_to_string(t));
+        return error_createf(ERROR_FILE_TYPE_INVALID, "File does not contain a valid %s header", utils_file_type_to_string(t));
     }
 
-    fclose(f);
-    return ok;
+    return error_none();
 }
 
 bool utils_copy_file_contents(const char *src, const char *dst) {
