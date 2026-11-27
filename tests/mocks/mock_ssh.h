@@ -33,6 +33,7 @@ typedef bool (*mock_ssh_download_cb)(
 
 typedef struct {
     bool create_succeeds;
+    error_return_t create_error;
     size_t create_calls;
     size_t destroy_calls;
     config_ssh_t last_cfg;

@@ -85,6 +85,7 @@ X(2001, ERROR_MQTT_CONNECTION_FAILED, "MQTT connection failed")
  * ========================================================================= */
 X(3001, ERROR_SSH_CONNECTION_FAILED, "SSH connection failed")
 X(3002, ERROR_SSH_AUTH_FAILED, "SSH authentication failed")
+X(3003, ERROR_SSH_CONNECTION_TIMEOUT, "SSH connection timed out")
 
 /* =========================================================================
  * SSH command execution

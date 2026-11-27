@@ -7,6 +7,9 @@
 
 #define MOCK_LIBSSH2_FAKE_FD 9999
 #define MOCK_LIBSSH2_MAX_CHUNKS 16
+#define MOCK_LIBSSH2_MAX_CONNECT_STEPS 8
+#define MOCK_LIBSSH2_MAX_POLL_STEPS 8
+#define MOCK_LIBSSH2_MAX_FCNTL_HISTORY 16
 #define MOCK_LIBSSH2_UPLOAD_BUF_SIZE 65536
 
 typedef struct {
@@ -22,6 +25,36 @@ typedef struct {
     int addrinfo_count;
     int socket_fail_on_call; /* 0 = never fail; 1-based index to fail */
     int connect_fail_count;  /* number of initial connect() calls that fail */
+    int connect_fail_errno;  /* errno for connect_fail_count (default ECONNREFUSED) */
+
+    /* Optional per-call connect() sequence */
+    int connect_step_rc[MOCK_LIBSSH2_MAX_CONNECT_STEPS];
+    int connect_step_errno[MOCK_LIBSSH2_MAX_CONNECT_STEPS];
+    size_t connect_step_count;
+    size_t connect_step_idx;
+
+    /* fcntl() controls for MOCK_LIBSSH2_FAKE_FD */
+    int fcntl_flags;
+    bool fcntl_getfl_fail;
+    bool fcntl_setfl_fail;
+    int fcntl_setfl_fail_on_call; /* 0 = never; 1-based call index */
+
+    /* Optional per-call poll() sequence */
+    int poll_step_rc[MOCK_LIBSSH2_MAX_POLL_STEPS];
+    int poll_step_errno[MOCK_LIBSSH2_MAX_POLL_STEPS];
+    short poll_step_revents[MOCK_LIBSSH2_MAX_POLL_STEPS];
+    long poll_step_advance_ms[MOCK_LIBSSH2_MAX_POLL_STEPS];
+    size_t poll_step_count;
+    size_t poll_step_idx;
+
+    /* getsockopt(SO_ERROR) controls */
+    bool getsockopt_fail;
+    int getsockopt_so_error;
+
+    /* Deterministic monotonic clock controls */
+    bool use_mock_clock;
+    long long mock_clock_ms;
+
     bool session_init_returns_null;
     int handshake_rc;
     int userauth_rc;
@@ -62,6 +95,15 @@ typedef struct {
     size_t freeaddrinfo_calls;
     size_t socket_calls;
     size_t connect_calls;
+    size_t fcntl_getfl_calls;
+    size_t fcntl_setfl_calls;
+    int fcntl_setfl_history[MOCK_LIBSSH2_MAX_FCNTL_HISTORY];
+    bool connect_saw_nonblock;
+    bool handshake_saw_nonblock;
+    size_t poll_calls;
+    int poll_timeouts[MOCK_LIBSSH2_MAX_POLL_STEPS];
+    size_t getsockopt_calls;
+    size_t clock_gettime_calls;
     size_t close_calls;
     size_t session_init_calls;
     size_t session_blocking_calls;
@@ -95,6 +137,8 @@ typedef struct {
 extern mock_libssh2_state_t g_mock_libssh2;
 
 void mock_libssh2_reset(void);
+void mock_libssh2_push_connect(int rc, int err);
+void mock_libssh2_push_poll(int rc, int err, short revents, long advance_ms);
 void mock_libssh2_push_stdout(const char *data, size_t len);
 void mock_libssh2_push_stdout_rc(ssize_t rc);
 void mock_libssh2_push_stderr(const char *data, size_t len);

@@ -8,6 +8,7 @@
 #include <libssh2_sftp.h>
 #include <linux/limits.h>
 #include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,13 +38,119 @@ void ssh_global_cleanup(void) {
     libssh2_exit();
 } 
 
-static int ssh_connect_tcp(const char *host, int port) {
+static int ssh_connect_with_timeout(
+    int sock,
+    const struct sockaddr *addr,
+    socklen_t addrlen,
+    int timeout_ms,
+    int *err_out
+) {
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0) {
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    int rc = connect(sock, addr, addrlen);
+    if (rc == 0) {
+        if (fcntl(sock, F_SETFL, flags) < 0) {
+            if (err_out) *err_out = errno;
+            return -1;
+        }
+        if (err_out) *err_out = 0;
+        return 0;
+    }
+
+    /* Per POSIX, EINTR on connect() leaves the connection attempt in progress asynchronously. */
+    if (errno != EINPROGRESS && errno != EINTR) {
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    struct timespec start;
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    int remaining_ms = timeout_ms;
+    for (;;) {
+        struct pollfd pfd;
+        pfd.fd = sock;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+
+        int prc = poll(&pfd, 1, remaining_ms);
+        if (prc > 0) {
+            int so_error = 0;
+            socklen_t so_len = sizeof(so_error);
+            if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &so_len) < 0) {
+                if (err_out) *err_out = errno;
+                return -1;
+            }
+            if (so_error != 0) {
+                if (err_out) *err_out = so_error;
+                return -1;
+            }
+            if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                if (err_out) *err_out = ECONNREFUSED;
+                return -1;
+            }
+            break;
+        }
+
+        if (prc == 0) {
+            if (err_out) *err_out = ETIMEDOUT;
+            return -1;
+        }
+
+        if (errno == EINTR) {
+            struct timespec now;
+            if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+                if (err_out) *err_out = errno;
+                return -1;
+            }
+
+            long long elapsed_ms =
+                (long long)(now.tv_sec - start.tv_sec) * 1000LL +
+                (long long)(now.tv_nsec - start.tv_nsec) / 1000000LL;
+            if (elapsed_ms < 0) {
+                elapsed_ms = 0;
+            }
+            if (elapsed_ms >= (long long)timeout_ms) {
+                if (err_out) *err_out = ETIMEDOUT;
+                return -1;
+            }
+            remaining_ms = (int)((long long)timeout_ms - elapsed_ms);
+            continue;
+        }
+
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    /* Restore original blocking socket flags so established SSH session behavior is unaffected. */
+    if (fcntl(sock, F_SETFL, flags) < 0) {
+        if (err_out) *err_out = errno;
+        return -1;
+    }
+
+    if (err_out) *err_out = 0;
+    return 0;
+}
+
+static int ssh_connect_tcp(const char *host, int port, error_return_t *err_out) {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
     struct addrinfo hints;
     struct addrinfo *res = NULL;
-    
+
     memset(&hints, 0, sizeof(hints));
 
     hints.ai_family = AF_UNSPEC;
@@ -53,21 +160,28 @@ static int ssh_connect_tcp(const char *host, int port) {
 
     if (rc != 0) {
         LOG_ERROR("getaddrinfo failed for %s:%s: %s", host, port_str, gai_strerror(rc));
+        if (err_out) {
+            *err_out = error_createf(ERROR_SSH_CONNECTION_FAILED, "Failed to resolve %s:%d: %s", host, port, gai_strerror(rc));
+        }
         return -1;
     }
 
     int sock = -1;
+    int last_errno = 0;
     struct addrinfo *p;
     for (p = res; p != NULL; p = p->ai_next) {
         sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (sock < 0) {
+            last_errno = errno;
             continue;
         }
 
-        if (connect(sock, p->ai_addr, p->ai_addrlen) == 0 ) {
+        int connect_err = 0;
+        if (ssh_connect_with_timeout(sock, p->ai_addr, p->ai_addrlen, SSH_TCP_CONNECT_TIMEOUT_MS, &connect_err) == 0) {
             break;
         }
 
+        last_errno = connect_err;
         close(sock);
         sock = -1;
     }
@@ -75,7 +189,34 @@ static int ssh_connect_tcp(const char *host, int port) {
     freeaddrinfo(res);
 
     if (sock < 0) {
-        LOG_ERROR("Failed to connect to %s:%d", host, port);
+        if (last_errno == ETIMEDOUT) {
+            LOG_ERROR("TCP connection to %s:%d timed out after %ds", host, port, SSH_TCP_CONNECT_TIMEOUT_MS / 1000);
+            if (err_out) {
+                *err_out = error_createf(
+                    ERROR_SSH_CONNECTION_TIMEOUT,
+                    "TCP connection to %s:%d timed out after %ds",
+                    host,
+                    port,
+                    SSH_TCP_CONNECT_TIMEOUT_MS / 1000
+                );
+            }
+        } else if (last_errno != 0) {
+            LOG_ERROR("Failed to connect to %s:%d: %s", host, port, strerror(last_errno));
+            if (err_out) {
+                *err_out = error_createf(
+                    ERROR_SSH_CONNECTION_FAILED,
+                    "Failed to connect to %s:%d: %s",
+                    host,
+                    port,
+                    strerror(last_errno)
+                );
+            }
+        } else {
+            LOG_ERROR("Failed to connect to %s:%d", host, port);
+            if (err_out) {
+                *err_out = error_createf(ERROR_SSH_CONNECTION_FAILED, "Failed to connect to %s:%d", host, port);
+            }
+        }
     }
 
     return sock;
@@ -102,13 +243,20 @@ static bool ssh_authenticate(LIBSSH2_SESSION *session, const config_ssh_t *cfg) 
     return true;
 }
 
-ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
+ssh_session_t *ssh_session_create_ex(const config_ssh_t *cfg, error_return_t *err_out) {
+    if (err_out) {
+        *err_out = error_none();
+    }
+
     if (!cfg || cfg->host[0] == '\0' || cfg->user[0] == '\0') {
         LOG_ERROR("ssh_session_create: invalid configuration");
+        if (err_out) {
+            *err_out = error_create(ERROR_SSH_CONNECTION_FAILED, "Invalid SSH configuration");
+        }
         return NULL;
     }
 
-    int sock = ssh_connect_tcp(cfg->host, cfg->port);
+    int sock = ssh_connect_tcp(cfg->host, cfg->port, err_out);
     if (sock < 0) {
         return NULL;
     }
@@ -117,6 +265,9 @@ ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
     if (!session) {
         LOG_ERROR("libssh2_session_init failed");
         close(sock);
+        if (err_out) {
+            *err_out = error_create(ERROR_SSH_CONNECTION_FAILED, "Failed to initialize SSH session");
+        }
         return NULL;
     }
 
@@ -127,6 +278,9 @@ ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
         LOG_ERROR("libssh2_session_handshake failed: %d", rc);
         libssh2_session_free(session);
         close(sock);
+        if (err_out) {
+            *err_out = error_create(ERROR_SSH_CONNECTION_FAILED, "SSH handshake failed");
+        }
         return NULL;
     }
 
@@ -134,6 +288,9 @@ ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
         libssh2_session_disconnect(session, "Authentication failed");
         libssh2_session_free(session);
         close(sock);
+        if (err_out) {
+            *err_out = error_create(ERROR_SSH_CONNECTION_FAILED, "SSH authentication failed");
+        }
         return NULL;
     }
 
@@ -143,6 +300,9 @@ ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
         libssh2_session_disconnect(session, "Memory error");
         libssh2_session_free(session);
         close(sock);
+        if (err_out) {
+            *err_out = error_create(ERROR_SSH_CONNECTION_FAILED, "Out of memory creating SSH session");
+        }
         return NULL;
     }
 
@@ -152,6 +312,10 @@ ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
 
     LOG_INFO("SSH session established to %s:%d", cfg->host, cfg->port);
     return s;
+}
+
+ssh_session_t *ssh_session_create(const config_ssh_t *cfg) {
+    return ssh_session_create_ex(cfg, NULL);
 }
 
 void ssh_session_destroy(ssh_session_t *s) {

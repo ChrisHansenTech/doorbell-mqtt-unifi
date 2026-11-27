@@ -7,8 +7,11 @@
 #include "ssh.h"
 #include "utils.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <linux/limits.h>
 #include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -297,6 +300,317 @@ void test_ssh_scp_download_success_trailing_nul_and_errors(void) {
     ssh_session_destroy(s);
 }
 
+void test_ssh_tcp_connect_success_immediate_and_async_restores_blocking(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* 1. Immediate connect() == 0 still uses non-blocking mode and restores blocking before handshake */
+    mock_libssh2_push_connect(0, 0);
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_TRUE(g_mock_libssh2.connect_saw_nonblock);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.fcntl_setfl_calls);
+    TEST_ASSERT_TRUE((g_mock_libssh2.fcntl_setfl_history[0] & O_NONBLOCK) != 0);
+    TEST_ASSERT_TRUE((g_mock_libssh2.fcntl_setfl_history[1] & O_NONBLOCK) == 0);
+    ssh_session_destroy(s);
+
+    /* 2. Asynchronous EINPROGRESS -> poll(10000ms) POLLOUT -> SO_ERROR == 0 -> blocking restored */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 50);
+    g_mock_libssh2.getsockopt_so_error = 0;
+
+    s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_TRUE(g_mock_libssh2.connect_saw_nonblock);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(SSH_TCP_CONNECT_TIMEOUT_MS, g_mock_libssh2.poll_timeouts[0]);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.getsockopt_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.session_blocking_calls);
+    ssh_session_destroy(s);
+}
+
+void test_ssh_tcp_connect_timeout_silently_dropped_packets(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* Simulate firewall silently dropping SYN packets: EINPROGRESS then poll() returns 0 */
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(0, 0, 0, SSH_TCP_CONNECT_TIMEOUT_MS);
+
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NULL(s);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.connect_calls);
+    TEST_ASSERT_TRUE(g_mock_libssh2.connect_saw_nonblock);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(SSH_TCP_CONNECT_TIMEOUT_MS, g_mock_libssh2.poll_timeouts[0]);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_TIMEOUT, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "timed out"));
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "192.168.1.50:22"));
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "10s"));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.freeaddrinfo_calls);
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_libssh2.session_init_calls);
+}
+
+void test_ssh_tcp_connect_immediate_and_async_connection_refused(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* Immediate ECONNREFUSED: fails immediately without polling */
+    mock_libssh2_push_connect(-1, ECONNREFUSED);
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "192.168.1.50:22"));
+    TEST_ASSERT_NOT_NULL(strstr(err.message, strerror(ECONNREFUSED)));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* Asynchronous ECONNREFUSED reported via SO_ERROR after poll() */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT | POLLERR, 5);
+    g_mock_libssh2.getsockopt_so_error = ECONNREFUSED;
+
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.getsockopt_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, strerror(ECONNREFUSED)));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+}
+
+void test_ssh_tcp_connect_host_and_network_unreachable(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* Immediate EHOSTUNREACH */
+    mock_libssh2_push_connect(-1, EHOSTUNREACH);
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, strerror(EHOSTUNREACH)));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* Immediate ENETUNREACH */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, ENETUNREACH);
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, strerror(ENETUNREACH)));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* Async EHOSTUNREACH via SO_ERROR */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT | POLLERR, 10);
+    g_mock_libssh2.getsockopt_so_error = EHOSTUNREACH;
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, strerror(EHOSTUNREACH)));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+}
+
+void test_ssh_tcp_connect_interrupted_attempts_eintr(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* 1. connect() returns EINTR -> per POSIX, wait asynchronously via poll() without retrying connect() */
+    mock_libssh2_push_connect(-1, EINTR);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 10);
+    g_mock_libssh2.getsockopt_so_error = 0;
+
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.connect_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+    ssh_session_destroy(s);
+
+    /* 2. poll() returns EINTR after 3000ms -> retries poll() with 7000ms remaining and succeeds */
+    mock_libssh2_reset();
+    g_mock_libssh2.use_mock_clock = true;
+    g_mock_libssh2.mock_clock_ms = 1000;
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(-1, EINTR, 0, 3000);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 50);
+    g_mock_libssh2.getsockopt_so_error = 0;
+
+    s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(10000, g_mock_libssh2.poll_timeouts[0]);
+    TEST_ASSERT_EQUAL_INT(7000, g_mock_libssh2.poll_timeouts[1]);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+    ssh_session_destroy(s);
+
+    /* 3. Repeated poll() EINTR exhausts monotonic 10s deadline -> returns ERROR_SSH_CONNECTION_TIMEOUT */
+    mock_libssh2_reset();
+    g_mock_libssh2.use_mock_clock = true;
+    g_mock_libssh2.mock_clock_ms = 5000;
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(-1, EINTR, 0, 6000);
+    mock_libssh2_push_poll(-1, EINTR, 0, 4500);
+
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.poll_calls);
+    TEST_ASSERT_EQUAL_INT(10000, g_mock_libssh2.poll_timeouts[0]);
+    TEST_ASSERT_EQUAL_INT(4000, g_mock_libssh2.poll_timeouts[1]);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_TIMEOUT, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+}
+
+void test_ssh_tcp_connect_socket_cleanup_on_failures_and_multi_addr(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* Multi-addrinfo: first times out, second is refused -> both sockets closed */
+    g_mock_libssh2.addrinfo_count = 2;
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(0, 0, 0, SSH_TCP_CONNECT_TIMEOUT_MS);
+    mock_libssh2_push_connect(-1, ECONNREFUSED);
+
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.socket_calls);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.close_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.freeaddrinfo_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+
+    /* Multi-addrinfo: first times out, second succeeds -> first socket closed, second kept until destroy */
+    mock_libssh2_reset();
+    g_mock_libssh2.addrinfo_count = 2;
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(0, 0, 0, SSH_TCP_CONNECT_TIMEOUT_MS);
+    mock_libssh2_push_connect(0, 0);
+
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.socket_calls);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+    ssh_session_destroy(s);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.close_calls);
+
+    /* fcntl F_GETFL failure closes socket */
+    mock_libssh2_reset();
+    g_mock_libssh2.fcntl_getfl_fail = true;
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_FAILED, err.error_code);
+
+    /* fcntl F_SETFL failure when enabling O_NONBLOCK closes socket */
+    mock_libssh2_reset();
+    g_mock_libssh2.fcntl_setfl_fail_on_call = 1;
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* fcntl F_SETFL failure when restoring blocking flags after connect closes socket */
+    mock_libssh2_reset();
+    g_mock_libssh2.fcntl_setfl_fail_on_call = 2;
+    mock_libssh2_push_connect(0, 0);
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* getsockopt(SO_ERROR) failure closes socket */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 5);
+    g_mock_libssh2.getsockopt_fail = true;
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* poll() non-EINTR error closes socket */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(-1, ENOMEM, 0, 5);
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    /* poll() reports POLLERR/POLLHUP even when SO_ERROR == 0 -> closes socket */
+    mock_libssh2_reset();
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLERR, 5);
+    g_mock_libssh2.getsockopt_so_error = 0;
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+}
+
+void test_ssh_tcp_connect_retry_succeeds_after_timeout(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    /* Attempt 1: timeout; Attempt 2: async connect succeeds without restarting anything */
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(0, 0, 0, SSH_TCP_CONNECT_TIMEOUT_MS);
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 20);
+    g_mock_libssh2.getsockopt_so_error = 0;
+
+    TEST_ASSERT_NULL(ssh_session_create_ex(&cfg, &err));
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_TIMEOUT, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.close_calls);
+
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+
+    mock_libssh2_push_stdout("ok", 2);
+    char *out_buf = NULL;
+    TEST_ASSERT_TRUE(ssh_exec_command(s, "echo ok", NULL, &out_buf, NULL, NULL, NULL));
+    TEST_ASSERT_EQUAL_STRING("ok", out_buf);
+    free(out_buf);
+
+    ssh_session_destroy(s);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_libssh2.close_calls);
+}
+
+void test_ssh_established_session_preserved_after_nonblock_connect(void) {
+    config_ssh_t cfg = make_ssh_cfg();
+    error_return_t err = {0};
+
+    mock_libssh2_push_connect(-1, EINPROGRESS);
+    mock_libssh2_push_poll(1, 0, POLLOUT, 15);
+    g_mock_libssh2.getsockopt_so_error = 0;
+
+    ssh_session_t *s = ssh_session_create_ex(&cfg, &err);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_FALSE(g_mock_libssh2.handshake_saw_nonblock);
+    TEST_ASSERT_EQUAL_UINT(1, g_mock_libssh2.session_blocking_calls);
+
+    /* Exec works on established session */
+    mock_libssh2_push_stdout("alive", 5);
+    char *out_buf = NULL;
+    TEST_ASSERT_TRUE(ssh_exec_command(s, "uptime", NULL, &out_buf, NULL, NULL, NULL));
+    TEST_ASSERT_EQUAL_STRING("alive", out_buf);
+    free(out_buf);
+
+    /* SCP upload works on established session */
+    char local_up[PATH_MAX];
+    snprintf(local_up, sizeof(local_up), "%s/clip.ogg", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_write_text(local_up, "payload"));
+    TEST_ASSERT_TRUE(ssh_scp_upload_file(s, local_up, "/tmp/dst", 0644));
+    TEST_ASSERT_EQUAL_UINT(7, g_mock_libssh2.uploaded_len);
+
+    /* SCP download works on established session */
+    char local_dn[PATH_MAX];
+    snprintf(local_dn, sizeof(local_dn), "%s/conf.json", g_tmp_dir);
+    g_mock_libssh2.scp_recv_size = 4;
+    mock_libssh2_push_recv("data", 4);
+    TEST_ASSERT_TRUE(ssh_scp_download_file(s, "/etc/conf.json", local_dn));
+
+    ssh_session_destroy(s);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -306,6 +620,16 @@ int main(void) {
     RUN_TEST(test_ssh_exec_command_stdout_stderr_eagain_and_failures);
     RUN_TEST(test_ssh_scp_upload_success_partial_writes_and_errors);
     RUN_TEST(test_ssh_scp_download_success_trailing_nul_and_errors);
+
+    /* Issue #47: TCP connect timeout regression tests */
+    RUN_TEST(test_ssh_tcp_connect_success_immediate_and_async_restores_blocking);
+    RUN_TEST(test_ssh_tcp_connect_timeout_silently_dropped_packets);
+    RUN_TEST(test_ssh_tcp_connect_immediate_and_async_connection_refused);
+    RUN_TEST(test_ssh_tcp_connect_host_and_network_unreachable);
+    RUN_TEST(test_ssh_tcp_connect_interrupted_attempts_eintr);
+    RUN_TEST(test_ssh_tcp_connect_socket_cleanup_on_failures_and_multi_addr);
+    RUN_TEST(test_ssh_tcp_connect_retry_succeeds_after_timeout);
+    RUN_TEST(test_ssh_established_session_preserved_after_nonblock_connect);
 
     return UNITY_END();
 }
