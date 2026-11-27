@@ -31,10 +31,10 @@ lcov.info
 # ---- VS Code ----
 .vscode/*
 *.code-workspace
-.vscode/extensions.json
-.vscode/launch.json
-.vscode/settings.json
-.vscode/tasks.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
 
 # ---- OS cruft ----
 .DS_Store
