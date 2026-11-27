@@ -1,0 +1,52 @@
+{
+  // Where your Unity tests live
+  "unityExplorer.testSourceFileRegex": "tests\\/test_.*\\.c",
+
+  // How to detect test functions
+  "unityExplorer.testCaseRegex": "void\\s+(test_.*)\\s*\\(.*\\)",
+
+  // Build settings
+  "unityExplorer.testBuildApplication": "make",
+  "unityExplorer.testBuildCwdPath": "${workspaceFolder}",
+  "unityExplorer.testBuildArgs": "BUILD=debug",
+  "unityExplorer.testBuildTargetRegex": "test-bin",
+
+  // Which executable to run for any test file
+  "unityExplorer.testExecutableRegex": "bin/$1",
+
+  // Optional: prettier labels in the UI
+  "unityExplorer.prettyTestCaseRegex": "test_(\\w+)",
+
+  // Coverage Gutters (ryanluker.vscode-coverage-gutters) integration
+  "coverage-gutters.coverageFileNames": [
+    "coverage/lcov.info",
+    "lcov.info"
+  ],
+  "coverage-gutters.coverageBaseDir": ".",
+  "coverage-gutters.coverageReportFileName": "coverage/html/index.html",
+  "coverage-gutters.showGutterCoverage": true,
+  "coverage-gutters.showLineCoverage": false,
+  "coverage-gutters.showRulerCoverage": true,
+
+  "files.associations": {
+    "string.h": "c",
+    "config.h": "c",
+    "stdio.h": "c",
+    "features.h": "c",
+    "stdlib.h": "c",
+    "mqttclient.h": "c",
+    "project_features.h": "c",
+    "stat.h": "c",
+    "stdbool.h": "c"
+  },
+  "editor.detectIndentation": false,
+  "editor.insertSpaces": true,
+  "cSpell.words": [
+    "createf",
+    "ERRF",
+    "mqtt",
+    "MQTTCLIENT",
+    "ubnt",
+    "unifi"
+  ]
+}

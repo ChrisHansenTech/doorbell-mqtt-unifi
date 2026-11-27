@@ -33,9 +33,12 @@ jobs:
           SHORTSHA="$(git rev-parse --short HEAD)"
           echo "VERSION=0.0.0-dev+${SHORTSHA}" >> $GITHUB_ENV
 
-      - name: Build + test
+      - name: Lint + Build + Test + Coverage
         run: |
           make clean
+          make lint
           make test EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
+          make coverage EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
+          make clean
           make release EXTRA_CFLAGS='-DAPP_VERSION="\"'"${VERSION}"'\"" '
 

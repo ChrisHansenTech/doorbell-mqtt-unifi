@@ -1,6 +1,13 @@
 # ---- Build artifacts ----
 /bin/
+/bin-cov/
 /build/
+/build-cov/
+/coverage/
+*.gcda
+*.gcno
+*.gcov
+lcov.info
 /temp/
 /tmp/
 /profiles/.state/
@@ -22,9 +29,11 @@
 *.log
 
 # ---- VS Code ----
-.vscode/
+.vscode/*
 *.code-workspace
+!.vscode/extensions.json
 !.vscode/launch.json
+!.vscode/settings.json
 !.vscode/tasks.json
 
 # ---- OS cruft ----

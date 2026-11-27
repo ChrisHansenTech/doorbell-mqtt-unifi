@@ -79,6 +79,9 @@ cleanup:
         ssh_session_destroy(session);
     }
 
+    unifi_ipc_raw_free(&ipc_state);
+    state_free_profile_state(&profile_state);
+
     if (!ok) {
         status_set_state("idle");
         return;
@@ -152,6 +155,9 @@ cleanup:
     if (session) {
         ssh_session_destroy(session);
     }
+
+    unifi_ipc_raw_free(&ipc_state);
+    state_free_profile_state(&profile_state);
 
     if (!ok) {
         status_set_state("idle");
@@ -269,8 +275,6 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         goto cleanup;
     }
 
-    ok = true;
-
     if (ctx->unifi_cfg->apply_method == UNIFI_APPLY_IPC) {
         if (!unifi_ipc_parse_apply_response(&ipc_state, &profile_state)) {
             HA_ERR(ERROR_STATE_PARSE_FAILED, "Failed to parse IPC state response. State will not survive restart of service");
@@ -282,6 +286,8 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
     if (rc != ERROR_NONE) {
         HA_ERRF(rc, "Failed to persist last_applied.json (profile=%s). State will not survive restart of service.", payload);
     }
+
+    ok = true;
      
     status_clear_error();
 
@@ -291,9 +297,11 @@ cleanup:
     }
 
     unifi_ipc_raw_free(&ipc_state);
+    state_free_profile_state(&profile_state);
 
     if (!ok) {
         status_set_state("idle");
+        return;
     }
 
     status_set_last_applied_profile("test-config");

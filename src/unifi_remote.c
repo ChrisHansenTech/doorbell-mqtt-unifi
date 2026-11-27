@@ -59,7 +59,7 @@ static int unifi_prepare_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
 static void unifi_cleanup_workdirs(ssh_session_t *session, unifi_workdir_t *wd) {
     char ssh_cmd[8192];
 
-    if (!utils_delete_directory(wd->local_temp_dir)) {
+    if (wd->local_temp_dir[0] != '\0' && !utils_delete_directory(wd->local_temp_dir)) {
         LOG_WARN("Failed to delete '%s'", wd->local_temp_dir);
     }
 
@@ -94,10 +94,26 @@ static int map_apply_step_to_error(const char *step, int rc) {
         return ERROR_PROFILE_APPLY_VERIFY_FAILED;
     }
 
-    if (strcmp(step, "restart") == 0) {
+    if (strncmp(step, "restart", 7) == 0) {
         return ERROR_PROFILE_APPLY_RESTART_FAILED;
     }
 
+    return ERROR_PROFILE_APPLY_FAILED;
+}
+
+static int resolve_apply_exec_error(bool exec_ok, int exit_status, const char *stderr_text, const char *context) {
+    ssh_step_error_t step_error;
+    if (ssh_parse_step_error(stderr_text, &step_error)) {
+        LOG_ERROR("%s failed at step '%s' with return code '%d'", context, step_error.step, step_error.rc);
+        return map_apply_step_to_error(step_error.step, step_error.rc);
+    }
+
+    if (!exec_ok) {
+        LOG_ERROR("%s SSH execution failed", context);
+        return ERROR_SSH_COMMAND_FAILED;
+    }
+
+    LOG_ERROR("%s exited with non-zero status %d", context, exit_status);
     return ERROR_PROFILE_APPLY_FAILED;
 }
 
@@ -460,7 +476,9 @@ static int legacy_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
     }
 
     int rc = ERROR_NONE;
+    int exit_status = -1;
     char ssh_cmd[8192];
+    ssh_cmd[0] = ' ';
     char *out = NULL;
     char *err = NULL;
     size_t out_len = 0;
@@ -471,14 +489,9 @@ static int legacy_apply(ssh_session_t *session, const unifi_workdir_t *wd) {
         goto cleanup;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd, NULL, &out, &out_len, &err, &err_len)) {
-        ssh_step_error_t step_error;
-        if (ssh_parse_step_error(err, &step_error)) {
-            LOG_ERROR("Apply profiles failed at step '%s' with return code '%d'", step_error.step, step_error.rc);
-            rc = map_apply_step_to_error(step_error.step, step_error.rc);
-        }
-        
-        rc = ERROR_PROFILE_APPLY_FAILED;
+    bool exec_ok = ssh_exec_command(session, ssh_cmd, &exit_status, &out, &out_len, &err, &err_len);
+    if (!exec_ok || exit_status != 0) {
+        rc = resolve_apply_exec_error(exec_ok, exit_status, err, "Apply profile");
         goto cleanup;
     }
 
@@ -499,10 +512,16 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd, unifi_ip
         return ERROR_PROFILE_INVALID;
     }
 
+    if (state) {
+        state->lcm_gui_json = NULL;
+        state->sounds_leds_json = NULL;
+    }
+
     int rc = ERROR_NONE;
-    
+    int move_rc = -1;
     
     char ssh_cmd[8192];
+    ssh_cmd[0] = ' ';
     char lcm_payload_path[PATH_MAX];
     char sound_payload_path[PATH_MAX];
     
@@ -528,14 +547,9 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd, unifi_ip
         goto cleanup;
     }
     
-    if (!ssh_exec_command(session, ssh_cmd, NULL, &std_out, &std_out_len, &err_out, &err_out_len)) {
-        ssh_step_error_t step_error;
-        if (ssh_parse_step_error(err_out, &step_error)) {
-            LOG_ERROR("Move assets IPC failed at step '%s' with return code '%d'", step_error.step, step_error.rc);
-            rc = map_apply_step_to_error(step_error.step, step_error.rc);
-        }
-        
-        rc = ERROR_PROFILE_APPLY_FAILED;
+    bool move_ok = ssh_exec_command(session, ssh_cmd, &move_rc, &std_out, &std_out_len, &err_out, &err_out_len);
+    if (!move_ok || move_rc != 0) {
+        rc = resolve_apply_exec_error(move_ok, move_rc, err_out, "Move assets IPC");
         goto cleanup;
     }
 
@@ -550,6 +564,12 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd, unifi_ip
     }
 
     if (!ssh_exec_command(session, ssh_cmd, &lcm_rc, &lcm_out, &lcm_out_len, &lcm_err, &lcm_err_len)) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (lcm_rc != 0) {
+        LOG_ERROR("ubnt_lcm_gui IPC command exited with status %d", lcm_rc);
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
@@ -565,19 +585,22 @@ static int ipc_apply(ssh_session_t *session, const unifi_workdir_t *wd, unifi_ip
     }
 
     if (!ssh_exec_command(session, ssh_cmd, &sound_rc, &sound_out, &sound_out_len, &sound_err, &sound_err_len)) {
+        rc = ERROR_SSH_COMMAND_FAILED;
+        goto cleanup;
+    }
+
+    if (sound_rc != 0) {
+        LOG_ERROR("ubnt_sounds_leds IPC command exited with status %d", sound_rc);
         rc = ERROR_PROFILE_APPLY_FAILED;
         goto cleanup;
     }
 
-    if (lcm_rc != ERROR_NONE || sound_rc != ERROR_NONE) {
-        rc = ERROR_PROFILE_APPLY_FAILED;
+    if (state) {
+        state->lcm_gui_json = lcm_out;
+        lcm_out = NULL;
+        state->sounds_leds_json = sound_out;
+        sound_out = NULL;
     }
-
-    state->lcm_gui_json = lcm_out;
-    lcm_out = NULL;
-    
-    state->sounds_leds_json = sound_out;
-    sound_out = NULL;
     
 cleanup:
     if (std_out) {
@@ -602,11 +625,6 @@ cleanup:
     
     if (sound_err) {
         free(sound_err);
-    }
-
-    if (rc != ERROR_NONE) {
-        state->lcm_gui_json = NULL;
-        state->sounds_leds_json = NULL;
     }
 
     return rc;
@@ -778,7 +796,7 @@ error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const c
         return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
 
-    error_return_t err;
+    error_return_t err = error_none();
     int rc;
 
     unifi_workdir_t wd = {0};
@@ -800,11 +818,13 @@ error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const c
         goto cleanup;
     }
 
-    if ((rc = unifi_stage_method_artifacts(session, profile, &wd, method) != ERROR_NONE)) {
+    if ((rc = unifi_stage_method_artifacts(session, profile, &wd, method)) != ERROR_NONE) {
+        err = error_create(rc, NULL);
         goto cleanup;
     }
 
     if ((rc = unifi_apply_method(session, &wd, method, applied_state)) != ERROR_NONE) {
+        err = error_create(rc, NULL);
         goto cleanup;
     }
 

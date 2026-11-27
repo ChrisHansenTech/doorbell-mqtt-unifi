@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug doorbell-mqtt-unifi",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/doorbell-mqtt-unifi",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "externalConsole": false,
+      "stopAtEntry": false,
+      "preLaunchTask": "Build (debug)"
+    },
+    {
+      "name": "Debug Unity tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/doorbell-mqtt-unifi_tests",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "externalConsole": false,
+      "stopAtEntry": false,
+      "preLaunchTask": "Build (debug)"
+    }
+  ]
+}

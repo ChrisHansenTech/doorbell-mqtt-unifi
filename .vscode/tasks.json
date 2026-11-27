@@ -1,0 +1,78 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build (release)",
+      "type": "shell",
+      "command": "make",
+      "args": ["BUILD=release"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Build (debug)",
+      "type": "shell",
+      "command": "make",
+      "args": ["BUILD=debug"],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Build (coverage)",
+      "type": "shell",
+      "command": "make",
+      "args": ["coverage-build"],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Clean",
+      "type": "shell",
+      "command": "make",
+      "args": ["clean"]
+    },
+    {
+      "label": "Test (debug)",
+      "type": "shell",
+      "command": "make",
+      "args": ["BUILD=debug", "test"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Test (with coverage)",
+      "type": "shell",
+      "command": "make",
+      "args": ["coverage"],
+      "group": "test",
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Coverage: Clean",
+      "type": "shell",
+      "command": "make",
+      "args": ["coverage-clean"]
+    },
+    {
+      "label": "Coverage: Open HTML Report",
+      "type": "shell",
+      "command": "xdg-open",
+      "args": ["coverage/html/index.html"],
+      "dependsOn": ["Test (with coverage)"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint & Check",
+      "type": "shell",
+      "command": "make",
+      "args": ["check"],
+      "group": "test",
+      "problemMatcher": "$gcc"
+    }
+  ]
+}

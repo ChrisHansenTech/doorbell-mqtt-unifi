@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "ryanluker.vscode-coverage-gutters",
+    "ms-vscode.cpptools",
+    "ms-vscode.makefile-tools"
+  ]
+}
