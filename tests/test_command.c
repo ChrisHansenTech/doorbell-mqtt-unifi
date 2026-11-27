@@ -555,6 +555,108 @@ void test_defect3_command_handlers_preserve_specific_apply_error_codes(void) {
     cJSON_Delete(err);
 }
 
+static void assert_ha_ssh_timeout_error_and_idle(void) {
+    const mock_mqtt_publish_t *status_pub = mock_mqtt_find_last_publish("/status");
+    TEST_ASSERT_NOT_NULL(status_pub);
+    TEST_ASSERT_EQUAL_STRING("idle", status_pub->payload);
+
+    const mock_mqtt_publish_t *err_pub = mock_mqtt_find_last_publish("/last_error");
+    TEST_ASSERT_NOT_NULL(err_pub);
+    cJSON *err = cJSON_Parse(err_pub->payload);
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_TIMEOUT, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_EQUAL_STRING("ERROR_SSH_CONNECTION_TIMEOUT", cJSON_GetObjectItem(err, "name")->valuestring);
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(err, "message")->valuestring, "timed out after 10s"));
+    cJSON_Delete(err);
+}
+
+void test_command_ssh_timeout_propagates_error_and_recovers_status_all_workflows(void) {
+    g_mock_ssh.create_succeeds = false;
+    g_mock_ssh.create_error = error_create(
+        ERROR_SSH_CONNECTION_TIMEOUT,
+        "TCP connection to 192.168.1.50:22 timed out after 10s"
+    );
+
+    /* 1. command_set_preset */
+    mock_mqtt_reset();
+    command_set_preset(&g_ctx, "Christmas", 9);
+    assert_ha_ssh_timeout_error_and_idle();
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+
+    /* 2. command_apply_custom */
+    mock_mqtt_reset();
+    command_apply_custom(&g_ctx, "my_custom", 9);
+    assert_ha_ssh_timeout_error_and_idle();
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+
+    /* 3. command_download_assets */
+    mock_mqtt_reset();
+    command_download_assets(&g_ctx, "PRESS", 5);
+    assert_ha_ssh_timeout_error_and_idle();
+
+    /* 4. command_test_config */
+    mock_mqtt_reset();
+    command_test_config(&g_ctx, "PRESS", 5);
+    assert_ha_ssh_timeout_error_and_idle();
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+
+    /* 5. command_play_sfx_preset */
+    mock_mqtt_reset();
+    command_play_sfx_preset(&g_ctx, "Chime", 5);
+    assert_ha_ssh_timeout_error_and_idle();
+    const mock_mqtt_publish_t *sfx_sel = mock_mqtt_find_last_publish("/sfxpreset/selected");
+    TEST_ASSERT_NOT_NULL(sfx_sel);
+    TEST_ASSERT_EQUAL_STRING("none", sfx_sel->payload);
+
+    /* 6. command_validate_profile */
+    mock_mqtt_reset();
+    command_validate_profile(&g_ctx, "PRESS", 5);
+    assert_ha_ssh_timeout_error_and_idle();
+    const mock_mqtt_publish_t *val_pub = mock_mqtt_find_last_publish("/profile_validation");
+    TEST_ASSERT_NOT_NULL(val_pub);
+    TEST_ASSERT_EQUAL_STRING("unknown", val_pub->payload);
+
+    /* 7. command_reapply_last_profile (after saving a valid prior state) */
+    g_mock_ssh.create_succeeds = true;
+    command_set_preset(&g_ctx, "Christmas", 9);
+
+    mock_mqtt_reset();
+    g_mock_ssh.create_succeeds = false;
+    g_mock_ssh.create_error = error_create(
+        ERROR_SSH_CONNECTION_TIMEOUT,
+        "TCP connection to 192.168.1.50:22 timed out after 10s"
+    );
+    command_reapply_last_profile(&g_ctx, "PRESS", 5);
+    assert_ha_ssh_timeout_error_and_idle();
+}
+
+void test_command_retry_succeeds_after_ssh_timeout(void) {
+    char state_file[PATH_MAX];
+    snprintf(state_file, sizeof(state_file), "%s/last_applied.json", g_state_dir);
+
+    /* First attempt times out */
+    g_mock_ssh.create_succeeds = false;
+    g_mock_ssh.create_error = error_create(
+        ERROR_SSH_CONNECTION_TIMEOUT,
+        "TCP connection to 192.168.1.50:22 timed out after 10s"
+    );
+    command_set_preset(&g_ctx, "Christmas", 9);
+    assert_ha_ssh_timeout_error_and_idle();
+    TEST_ASSERT_FALSE(utils_file_exists(state_file));
+
+    /* Subsequent attempt succeeds without restarting service */
+    mock_mqtt_reset();
+    g_mock_ssh.create_succeeds = true;
+    command_set_preset(&g_ctx, "Christmas", 9);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_EQUAL_STRING("Christmas", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_TRUE(utils_file_exists(state_file));
+    cJSON *err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -571,6 +673,10 @@ int main(void) {
     RUN_TEST(test_defect1_command_apply_custom_does_not_report_success_on_staging_failure);
     RUN_TEST(test_defect1_command_test_config_does_not_report_success_on_failure);
     RUN_TEST(test_defect3_command_handlers_preserve_specific_apply_error_codes);
+
+    /* Issue #47: SSH TCP connect timeout error propagation and status recovery */
+    RUN_TEST(test_command_ssh_timeout_propagates_error_and_recovers_status_all_workflows);
+    RUN_TEST(test_command_retry_succeeds_after_ssh_timeout);
 
     return UNITY_END();
 }

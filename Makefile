@@ -99,6 +99,7 @@ WRAP_SSH_OPS_FLAGS := \
 
 WRAP_SSH_ALL_FLAGS := \
   -Wl,--wrap=ssh_session_create \
+  -Wl,--wrap=ssh_session_create_ex \
   -Wl,--wrap=ssh_session_destroy \
   $(WRAP_SSH_OPS_FLAGS)
 
@@ -123,6 +124,10 @@ WRAP_LIBSSH2_FLAGS := \
   -Wl,--wrap=freeaddrinfo \
   -Wl,--wrap=socket \
   -Wl,--wrap=connect \
+  -Wl,--wrap=fcntl \
+  -Wl,--wrap=poll \
+  -Wl,--wrap=getsockopt \
+  -Wl,--wrap=clock_gettime \
   -Wl,--wrap=close \
   -Wl,--wrap=libssh2_session_init_ex \
   -Wl,--wrap=libssh2_session_set_blocking \

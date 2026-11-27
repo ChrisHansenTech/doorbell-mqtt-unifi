@@ -12,21 +12,32 @@ static int g_fake_session_sentinel = 42;
 void mock_ssh_reset(void) {
     memset(&g_mock_ssh, 0, sizeof(g_mock_ssh));
     g_mock_ssh.create_succeeds = true;
+    g_mock_ssh.create_error = error_create(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
 }
 
 ssh_session_t *mock_ssh_fake_session(void) {
     return (ssh_session_t *)&g_fake_session_sentinel;
 }
 
-ssh_session_t *__wrap_ssh_session_create(const config_ssh_t *cfg) {
+ssh_session_t *__wrap_ssh_session_create_ex(const config_ssh_t *cfg, error_return_t *err_out) {
     g_mock_ssh.create_calls++;
     if (cfg) {
         g_mock_ssh.last_cfg = *cfg;
     }
     if (!g_mock_ssh.create_succeeds) {
+        if (err_out) {
+            *err_out = g_mock_ssh.create_error;
+        }
         return NULL;
     }
+    if (err_out) {
+        *err_out = error_none();
+    }
     return mock_ssh_fake_session();
+}
+
+ssh_session_t *__wrap_ssh_session_create(const config_ssh_t *cfg) {
+    return __wrap_ssh_session_create_ex(cfg, NULL);
 }
 
 void __wrap_ssh_session_destroy(ssh_session_t *session) {

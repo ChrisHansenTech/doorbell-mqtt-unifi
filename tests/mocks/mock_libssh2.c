@@ -3,8 +3,11 @@
 #include "mock_libssh2.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,10 +22,33 @@ static int g_fake_channel_obj = 2;
 static int g_fake_scp_recv_channel_obj = 3;
 
 extern int __real_close(int fd);
+extern int __real_fcntl(int fd, int cmd, ...);
+extern int __real_poll(struct pollfd *fds, nfds_t nfds, int timeout);
+extern int __real_getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
+extern int __real_clock_gettime(clockid_t clk_id, struct timespec *tp);
 
 void mock_libssh2_reset(void) {
     memset(&g_mock_libssh2, 0, sizeof(g_mock_libssh2));
     g_mock_libssh2.addrinfo_count = 1;
+    g_mock_libssh2.connect_fail_errno = ECONNREFUSED;
+}
+
+void mock_libssh2_push_connect(int rc, int err) {
+    if (g_mock_libssh2.connect_step_count < MOCK_LIBSSH2_MAX_CONNECT_STEPS) {
+        size_t idx = g_mock_libssh2.connect_step_count++;
+        g_mock_libssh2.connect_step_rc[idx] = rc;
+        g_mock_libssh2.connect_step_errno[idx] = err;
+    }
+}
+
+void mock_libssh2_push_poll(int rc, int err, short revents, long advance_ms) {
+    if (g_mock_libssh2.poll_step_count < MOCK_LIBSSH2_MAX_POLL_STEPS) {
+        size_t idx = g_mock_libssh2.poll_step_count++;
+        g_mock_libssh2.poll_step_rc[idx] = rc;
+        g_mock_libssh2.poll_step_errno[idx] = err;
+        g_mock_libssh2.poll_step_revents[idx] = revents;
+        g_mock_libssh2.poll_step_advance_ms[idx] = advance_ms;
+    }
 }
 
 void mock_libssh2_push_stdout(const char *data, size_t len) {
@@ -125,6 +151,7 @@ int __wrap_socket(int domain, int type, int protocol) {
         errno = EMFILE;
         return -1;
     }
+    g_mock_libssh2.fcntl_flags = 0; /* new sockets start blocking */
     return MOCK_LIBSSH2_FAKE_FD;
 }
 
@@ -133,11 +160,110 @@ int __wrap_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     (void)addr;
     (void)addrlen;
     g_mock_libssh2.connect_calls++;
+    g_mock_libssh2.connect_saw_nonblock = (g_mock_libssh2.fcntl_flags & O_NONBLOCK) != 0;
+
+    if (g_mock_libssh2.connect_step_count > 0 && g_mock_libssh2.connect_step_idx < g_mock_libssh2.connect_step_count) {
+        size_t idx = g_mock_libssh2.connect_step_idx++;
+        if (g_mock_libssh2.connect_step_rc[idx] < 0) {
+            errno = g_mock_libssh2.connect_step_errno[idx];
+        }
+        return g_mock_libssh2.connect_step_rc[idx];
+    }
+
     if ((int)g_mock_libssh2.connect_calls <= g_mock_libssh2.connect_fail_count) {
-        errno = ECONNREFUSED;
+        errno = g_mock_libssh2.connect_fail_errno ? g_mock_libssh2.connect_fail_errno : ECONNREFUSED;
         return -1;
     }
     return 0;
+}
+
+int __wrap_fcntl(int fd, int cmd, ...) {
+    va_list ap;
+    va_start(ap, cmd);
+    long arg = 0;
+    if (cmd == F_SETFL || cmd == F_SETFD || cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC) {
+        arg = va_arg(ap, int);
+    } else if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) {
+        arg = (long)va_arg(ap, void *);
+    }
+    va_end(ap);
+
+    if (fd == MOCK_LIBSSH2_FAKE_FD) {
+        if (cmd == F_GETFL) {
+            g_mock_libssh2.fcntl_getfl_calls++;
+            if (g_mock_libssh2.fcntl_getfl_fail) {
+                errno = EBADF;
+                return -1;
+            }
+            return g_mock_libssh2.fcntl_flags;
+        }
+        if (cmd == F_SETFL) {
+            g_mock_libssh2.fcntl_setfl_calls++;
+            if (g_mock_libssh2.fcntl_setfl_calls <= MOCK_LIBSSH2_MAX_FCNTL_HISTORY) {
+                g_mock_libssh2.fcntl_setfl_history[g_mock_libssh2.fcntl_setfl_calls - 1] = (int)arg;
+            }
+            if (g_mock_libssh2.fcntl_setfl_fail ||
+                (g_mock_libssh2.fcntl_setfl_fail_on_call > 0 &&
+                 (int)g_mock_libssh2.fcntl_setfl_calls == g_mock_libssh2.fcntl_setfl_fail_on_call)) {
+                errno = EINVAL;
+                return -1;
+            }
+            g_mock_libssh2.fcntl_flags = (int)arg;
+            return 0;
+        }
+        return 0;
+    }
+
+    return __real_fcntl(fd, cmd, arg);
+}
+
+int __wrap_poll(struct pollfd *fds, nfds_t nfds, int timeout) {
+    if (nfds == 1 && fds && fds[0].fd == MOCK_LIBSSH2_FAKE_FD) {
+        size_t call_idx = g_mock_libssh2.poll_calls++;
+        if (call_idx < MOCK_LIBSSH2_MAX_POLL_STEPS) {
+            g_mock_libssh2.poll_timeouts[call_idx] = timeout;
+        }
+        if (g_mock_libssh2.poll_step_count > 0 && g_mock_libssh2.poll_step_idx < g_mock_libssh2.poll_step_count) {
+            size_t idx = g_mock_libssh2.poll_step_idx++;
+            g_mock_libssh2.mock_clock_ms += g_mock_libssh2.poll_step_advance_ms[idx];
+            fds[0].revents = g_mock_libssh2.poll_step_revents[idx];
+            if (g_mock_libssh2.poll_step_rc[idx] < 0) {
+                errno = g_mock_libssh2.poll_step_errno[idx];
+            }
+            return g_mock_libssh2.poll_step_rc[idx];
+        }
+        fds[0].revents = POLLOUT;
+        return 1;
+    }
+
+    return __real_poll(fds, nfds, timeout);
+}
+
+int __wrap_getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen) {
+    if (sockfd == MOCK_LIBSSH2_FAKE_FD && level == SOL_SOCKET && optname == SO_ERROR) {
+        g_mock_libssh2.getsockopt_calls++;
+        if (g_mock_libssh2.getsockopt_fail) {
+            errno = EBADF;
+            return -1;
+        }
+        if (optval && optlen && *optlen >= sizeof(int)) {
+            *(int *)optval = g_mock_libssh2.getsockopt_so_error;
+            *optlen = sizeof(int);
+        }
+        return 0;
+    }
+
+    return __real_getsockopt(sockfd, level, optname, optval, optlen);
+}
+
+int __wrap_clock_gettime(clockid_t clk_id, struct timespec *tp) {
+    if (g_mock_libssh2.use_mock_clock && clk_id == CLOCK_MONOTONIC && tp) {
+        g_mock_libssh2.clock_gettime_calls++;
+        tp->tv_sec = (time_t)(g_mock_libssh2.mock_clock_ms / 1000LL);
+        tp->tv_nsec = (long)((g_mock_libssh2.mock_clock_ms % 1000LL) * 1000000LL);
+        return 0;
+    }
+    return __real_clock_gettime(clk_id, tp);
 }
 
 int __wrap_close(int fd) {
@@ -175,6 +301,7 @@ int __wrap_libssh2_session_handshake(LIBSSH2_SESSION *session, libssh2_socket_t 
     (void)session;
     (void)sock;
     g_mock_libssh2.handshake_calls++;
+    g_mock_libssh2.handshake_saw_nonblock = (g_mock_libssh2.fcntl_flags & O_NONBLOCK) != 0;
     return g_mock_libssh2.handshake_rc;
 }
 

@@ -20,6 +20,12 @@
 #include <string.h>
 #include <strings.h>
 
+#define REPORT_SSH_CONNECT_ERR(err) \
+    HA_ERR( \
+        ((err).error_code != ERROR_NONE) ? (err).error_code : ERROR_SSH_CONNECTION_FAILED, \
+        ((err).message[0] != '\0') ? (err).message : "Failed to create SSH session" \
+    )
+
 void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_t payloadLen) {
     if (ctx == NULL || payload == NULL || payloadLen == 0) {
         return;
@@ -46,9 +52,10 @@ void command_set_preset(const mqtt_router_ctx_t *ctx, const char *payload, size_
         goto cleanup;
     }
 
-    session = ssh_session_create(ctx->ssh_cfg);
+    error_return_t ssh_err = {0};
+    session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
     if (!session) {
-        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
+        REPORT_SSH_CONNECT_ERR(ssh_err);
         goto cleanup;
     }
 
@@ -123,9 +130,10 @@ void command_apply_custom(const mqtt_router_ctx_t *ctx, const char *payload, siz
         goto cleanup;
     }
 
-    session = ssh_session_create(ctx->ssh_cfg);
+    error_return_t ssh_err = {0};
+    session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
     if (!session) {
-        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
+        REPORT_SSH_CONNECT_ERR(ssh_err);
         goto cleanup;
     }
 
@@ -181,7 +189,7 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload, 
   time_t now = time(NULL);
   char iso_timestamp[25];
   char local_path[PATH_MAX];
-  char temp_path[PATH_MAX];
+  char temp_path[PATH_MAX] = {0};
   char final_dir[PATH_MAX];
   char final_path[PATH_MAX];
   unifi_profile_t profile;
@@ -192,9 +200,14 @@ void command_download_assets(const mqtt_router_ctx_t *ctx, const char *payload, 
     HA_ERR(ERROR_PROFILE_DOWNLOAD_FAILED, "Failed to create temp path");
   }
 
-  ssh_session_t *session = ssh_session_create(ctx->ssh_cfg);
+  error_return_t ssh_err = {0};
+  ssh_session_t *session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
   if (!session) {
-    HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session.");
+    REPORT_SSH_CONNECT_ERR(ssh_err);
+    if (temp_path[0] != '\0') {
+      utils_delete_directory(temp_path);
+    }
+    status_set_state("idle");
     return;
   }
 
@@ -263,10 +276,11 @@ void command_test_config(const mqtt_router_ctx_t *ctx, const char *payload, size
         goto cleanup;
     }
 
-    session = ssh_session_create(ctx->ssh_cfg);
+    error_return_t ssh_err = {0};
+    session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
     if (!session) {
-        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
-        return;
+        REPORT_SSH_CONNECT_ERR(ssh_err);
+        goto cleanup;
     }
 
     result = unifi_profile_upload_and_apply_ex(session, profile_path, &profile, ctx->unifi_cfg->apply_method, &ipc_state);
@@ -325,10 +339,11 @@ void command_play_sfx_preset(const mqtt_router_ctx_t *ctx, const char *payload, 
         return;
     }
 
-    session = ssh_session_create(ctx->ssh_cfg);
+    error_return_t ssh_err = {0};
+    session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
     if (!session) {
-        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
-        return;
+        REPORT_SSH_CONNECT_ERR(ssh_err);
+        goto cleanup;
     }
 
     error_return_t result = unifi_sfx_upload_and_play(session, sfx, ctx->sfx_ctx->sounds_dir);
@@ -372,10 +387,12 @@ void command_validate_profile(const mqtt_router_ctx_t *ctx, const char *payload,
         return;
     }
 
-    session = ssh_session_create(ctx->ssh_cfg);
+    error_return_t ssh_err = {0};
+    session = ssh_session_create_ex(ctx->ssh_cfg, &ssh_err);
     if (!session) {
-        HA_ERR(ERROR_SSH_CONNECTION_FAILED, "Failed to create SSH session");
-        return;
+        REPORT_SSH_CONNECT_ERR(ssh_err);
+        status_set_validate_profile("unknown", "", "", "", iso_timestamp);
+        goto cleanup;
     }
 
     rc = unifi_fetch_state(session, &ipc_state);

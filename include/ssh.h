@@ -1,9 +1,12 @@
 #pragma once
 
 #include "config_types.h"
+#include "errors.h"
 
 #include <stdbool.h>
 #include <stddef.h>
+
+#define SSH_TCP_CONNECT_TIMEOUT_MS 10000
 
 typedef struct ssh_session ssh_session_t;
 
@@ -12,6 +15,8 @@ bool ssh_global_init(void);
 void ssh_global_cleanup(void);
 
 ssh_session_t *ssh_session_create(const config_ssh_t *ssh_cfg);
+
+ssh_session_t *ssh_session_create_ex(const config_ssh_t *ssh_cfg, error_return_t *err_out);
 
 void ssh_session_destroy(ssh_session_t *session);
 

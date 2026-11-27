@@ -322,6 +322,42 @@ void test_integration_legacy_migration_and_ha_connect_state_restore(void) {
     TEST_ASSERT_EQUAL_UINT(7, g_mock_mqtt.subscribe_count);
 }
 
+void test_integration_ssh_timeout_error_propagation_and_recovery(void) {
+    /* 1. Simulate TCP connect timeout during preset apply over MQTT router */
+    g_mock_ssh.create_succeeds = false;
+    g_mock_ssh.create_error = error_create(
+        ERROR_SSH_CONNECTION_TIMEOUT,
+        "TCP connection to 192.168.1.50:22 timed out after 10s"
+    );
+
+    dispatch_mqtt_command("cmd/preset_set", "Christmas");
+
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+    cJSON *err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(ERROR_SSH_CONNECTION_TIMEOUT, cJSON_GetObjectItem(err, "code")->valueint);
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(err, "message")->valuestring, "timed out after 10s"));
+    cJSON_Delete(err);
+
+    /* 2. Doorbell becomes reachable again -> retry succeeds without restart */
+    mock_mqtt_reset();
+    g_mock_ssh.create_succeeds = true;
+    dispatch_mqtt_command("cmd/preset_set", "Christmas");
+
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_EQUAL_STRING("Christmas", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    /* 3. Subsequent validate confirms match */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/validate_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -329,6 +365,7 @@ int main(void) {
     RUN_TEST(test_integration_download_assets_creates_loadable_profile);
     RUN_TEST(test_integration_sfx_playback_over_mqtt_router);
     RUN_TEST(test_integration_legacy_migration_and_ha_connect_state_restore);
+    RUN_TEST(test_integration_ssh_timeout_error_propagation_and_recovery);
 
     return UNITY_END();
 }
