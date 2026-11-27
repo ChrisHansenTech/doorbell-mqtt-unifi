@@ -297,10 +297,10 @@ coverage-clean:
 	@$(RM) -r build-cov bin-cov $(COVDIR)
 
 coverage-build:
-	$(MAKE) test-bin BUILD=coverage EXTRA_CFLAGS="$(EXTRA_CFLAGS)" EXTRA_LDFLAGS="$(EXTRA_LDFLAGS)"
+	$(MAKE) test-bin BUILD=coverage
 
 coverage: coverage-clean
-	$(MAKE) test BUILD=coverage EXTRA_CFLAGS="$(EXTRA_CFLAGS)" EXTRA_LDFLAGS="$(EXTRA_LDFLAGS)"
+	$(MAKE) test BUILD=coverage
 	python3 scripts/coverage_report.py build-cov \
 		--lcov $(COVDIR)/lcov.info \
 		--html $(COVDIR)/html \
