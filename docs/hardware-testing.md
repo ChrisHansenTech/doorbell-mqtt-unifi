@@ -1,0 +1,106 @@
+# Manual Hardware Testing Guide
+
+This guide defines the reusable manual validation procedures for verifying `doorbell-mqtt-unifi` against a live **UniFi Protect G4 Doorbell Pro**, an MQTT broker, and Home Assistant.
+
+Automated unit, integration, and startup smoke tests run completely offline using link-time mocks (see [TESTING.md](../TESTING.md)). Use this guide before releases, after firmware updates, or after modifying SSH, SCP, IPC, Home Assistant discovery, or Docker runtime code.
+
+---
+
+## Scope
+
+Manual hardware validation covers behaviors that cannot be verified offline:
+
+- Live TCP/SSH handshake and password authentication against the doorbell's SSH daemon using `UNIFI_PROTECT_RECOVERY_CODE`.
+- Actual execution of `ubnt_ipc_cli` (`ChangeLcmGuiSettings`, `ChangeSoundLedSettings`) and firmware JSON response parsing.
+- Actual execution of `/usr/local/bin/playSound.sh` and audible playback on the doorbell speaker.
+- Legacy `.conf` patching and `killall`/`pidof` service restart behavior (`ubnt_lcm_gui`, `ubnt_sounds_leds`).
+- Storage guardrail execution (`df -kP` / `du -sk`) on `/var/etc/persistent` under BusyBox.
+- Home Assistant MQTT Discovery ingestion, entity controls, and sensor updates.
+- Docker container entrypoint behavior (`docker-entrypoint.sh`, `PUID`/`PGID` privilege drop, and mounted volumes).
+
+---
+
+## Prerequisites and Safety Rules
+
+### Requirements
+
+- **Hardware**: UniFi Protect G4 Doorbell Pro with SSH enabled, `ubnt_ipc_cli`, and `/usr/local/bin/playSound.sh`.
+- **Services**: Reachable MQTT broker and Home Assistant instance with the MQTT integration enabled.
+- **Build**: Fresh release binary (`make release`) or container image (`docker build .`).
+- **Isolated test data**: Dedicated test `config.json`, at least two valid profile directories (with `.png` animation and `.ogg`/`.wav` ring sound), at least one valid SFX file under `/sounds`, and a separate `MQTT_INSTANCE` (e.g., `test_doorbell`) if testing alongside a production instance.
+
+### Safety Rules (Non-Destructive Testing Only)
+
+- **Never** perform destructive operations on a physical doorbell (do not intentionally fill `/var/etc/persistent`, alter permissions under `/etc/persistent`, or kill unrelated Protect processes).
+- **Back up** the doorbell's current profile first using the **Download assets** button (or keep a known-good preset ready to restore afterward).
+- For destructive fault conditions (disk full, permission denied, service restart timeout), use the automated unit tests described in [Automated Alternatives for Destructive Faults](#automated-alternatives-for-destructive-faults).
+
+---
+
+## Permanent Expected Behavior Test Procedures
+
+The scenarios below describe the **permanent expected behavior** of the service.
+
+### Core Profile, Audio, and Asset Workflows
+
+| # | Scenario | Mode / Prereq | Steps | Expected Behavior |
+|---|---|---|---|---|
+| 1 | **IPC profile upload, apply, and validation** | `unifi.apply_method = "ipc"` | Select a valid preset (with `.png` + `.ogg`/`.wav`) in Home Assistant **Presets**, then press **Validate profile**. | **Status** transitions `uploading` → `idle`; **Last error** clears to code `0`; **Last applied profile** updates to the preset name; doorbell displays the new animation and uses the new ring sound in <2 seconds; **Validate profile** reports `match`. |
+| 2 | **Sound configuration change** | IPC or Legacy | Update a test profile's `ringButton.file` or `volume`, apply the profile, and press the physical doorbell button. | Doorbell plays the updated ring audio at the configured volume; **Last error** reports code `0`. |
+| 3 | **Legacy profile operation** | `unifi.apply_method = "legacy"` | Set `UNIFI_APPLY_METHOD=legacy` (or `"apply_method": "legacy"`), restart the service, and select a valid preset. | Service downloads `.conf` files, patches them, uploads updates, restarts `ubnt_lcm_gui` and `ubnt_sounds_leds` (~30 seconds), returns **Status** to `idle`, clears **Last error** to `0`, and updates the doorbell display/sound. Pressing **Validate profile** reports `unsupported`. |
+| 4 | **Test config button** | IPC and Legacy | Press **Test config** in Home Assistant. | Applies `./test-profile`, clears **Last error** to `0`, sets **Last applied profile** to `test-config`, resets **Presets** to `none`, and returns **Status** to `idle`. |
+| 5 | **Asset download** | IPC or Legacy | Press **Download assets** in Home Assistant. | **Status** transitions `downloading` → `idle`; assets and generated `profile.json` are saved under `/profiles/downloads/<YYYYMMDD_HHMMSS>`; **Last asset download** timestamp and attributes update; **Last error** clears to `0`. |
+| 6 | **Ad-hoc SFX preset playback** | Configured `sfx.presets` + `/sounds` file | Select an SFX preset in Home Assistant **SFX presets**. | Doorbell plays the audio file immediately (<1 second) without changing the active profile or restarting doorbell processes; remote `/tmp/doorbell-mqtt-unifi/sfx` file is cleaned up; **SFX presets** resets to `none`; **Status** returns to `idle`; **Last error** clears to `0`. |
+
+### Error Handling, State Integrity, and Recovery
+
+| # | Scenario | Mode / Prereq | Steps | Expected Behavior |
+|---|---|---|---|---|
+| 7 | **Failed SSH authentication (safe)** | Any | Configure an intentionally wrong `UNIFI_PROTECT_RECOVERY_CODE`, restart the service, and trigger **Presets** or **Test config**. | Operation fails cleanly without crashing; **Last error** reports `ERROR_SSH_CONNECTION_FAILED` (`3001`); **Last applied profile** and `/config/state/last_applied.json` are **not** overwritten; **Status** returns to `idle`. |
+| 8 | **Unreachable doorbell (safe)** | Any | Point `SSH_HOST` to an unused RFC 5737 or unreachable LAN IP (e.g., `192.0.2.1`), restart the service, and trigger **Presets**. | Operation fails cleanly without crashing; **Last error** reports `ERROR_SSH_CONNECTION_FAILED` (`3001`); **Last applied profile** and persisted state remain unchanged; **Status** returns to `idle`. |
+| 9 | **Failed remote upload / staging (safe)** | IPC and Legacy | Temporarily remove or rename a referenced asset file in a test profile directory (or replace it with a non-PNG spoofed `.png` file), then select that preset. | Fails during staging before apply runs; **Last error** reports `ERROR_FILE_NOT_FOUND` (`1205`) or `ERROR_FILE_TYPE_INVALID` (`1204`); doorbell configuration is untouched; remote `/tmp/doorbell-mqtt-unifi/profile` and local temp upload directory are cleaned up; **Last applied profile** is unchanged; **Status** returns to `idle`. |
+| 10 | **Recovery following a failed operation** | IPC and Legacy | Immediately after Scenario 7 (after restoring credentials) or Scenario 9 (without restarting the container), select a valid preset. | Subsequent apply succeeds cleanly, clears **Last error** (`code=0`, `name=ERROR_NONE`, `message=""`), updates **Last applied profile**, and **Validate profile** reports `match` (in IPC mode). |
+| 11 | **Home Assistant status & error reporting** | Live Home Assistant | Observe **Status**, **Last error** (state + `code`/`name`/`message` attributes), and **Last applied profile** across Scenarios 1–10. | Every failure publishes a specific non-zero error code, name, and message; failed operations never publish success state; a subsequent successful operation clears **Last error** back to `0`. |
+| 12 | **Stability under repeated failures** | Any | Trigger 5 consecutive failing profile applies (e.g., missing asset or invalid `profile.json`) followed by 1 valid apply while monitoring logs and container resource usage (`docker stats`). | Service remains responsive with no crash or stuck `uploading` state, recovers on the valid apply, and leaves no leaked `/tmp/doorbell-mqtt-unifi/upload-*` directories on the host. |
+
+### Container Runtime Smoke Check
+
+| # | Scenario | Mode / Prereq | Steps | Expected Behavior |
+|---|---|---|---|---|
+| 13 | **Docker entrypoint and volumes** | Docker (`linux/amd64` or `linux/arm64`) | Start a fresh container with empty `/config`, `/profiles`, `/sounds` mounts and custom `PUID`/`PGID`. | Entrypoint initializes `/config/config.json` on first run, drops privileges to `PUID`/`PGID` via `gosu`, starts the service cleanly, and stops cleanly on `docker stop` (`SIGTERM`). |
+
+---
+
+## Automated Alternatives for Destructive Faults
+
+Do **not** simulate the following failure modes on physical hardware; verify them with the offline unit test suites instead:
+
+- **Remote disk full (`rc=28` → `ERROR_REMOTE_DISK_FULL`)**
+- **Remote permission denied (`rc=13` → `ERROR_PROFILE_APPLY_PERMISSION_DENIED`)**
+- **Remote file move / verification failure (`move_*`, `verify_*`)**
+- **Legacy service restart timeout (`rc=210` → `ERROR_PROFILE_APPLY_RESTART_FAILED`)**
+- **Cleanup failure not overwriting the primary upload/apply error**
+
+Run the automated suites that verify all of these paths:
+
+```bash
+make test SUITE=test_unifi_remote
+make test SUITE=test_command
+```
+
+---
+
+## Temporary Limitations and Known Defects
+
+The behaviors below are **temporary limitations or known defects** in the current implementation rather than intended permanent behavior. Review and remove items from this section as their corresponding GitHub issues are resolved:
+
+1. **SSH TCP connect and session timeouts (Scenario 8)**:
+   `src/ssh.c` currently uses a blocking `connect()` without a custom socket timeout (relying on the OS default, ~127 seconds on Linux) and does not call `libssh2_session_set_timeout()`. Unreachable-host tests may therefore take up to ~2 minutes to fail.
+2. **Early-return stuck Home Assistant status in secondary commands (Scenarios 4, 5, 6, 7)**:
+   **Presets** (`command_set_preset`) and **Custom profile** (`command_apply_custom`) always reset **Status** to `idle` on failure, and **Test config** resets **Status** on staging/apply failure. However, if SSH session creation fails in **Test config**, **Asset download**, **SFX presets**, or **Validate profile** — or if `last_applied.json` cannot be loaded in **Reapply last profile** — **Status** may remain stuck in `uploading`, `downloading`, or `validating` until another command completes.
+3. **Custom profile directory command in Docker**:
+   `command_apply_custom()` currently builds profile paths relative to `./profiles` instead of `DOORBELL_PROFILES_DIR` (`/profiles`). Testing custom directory applies inside Docker may fail with `ERROR_PROFILE_NOT_FOUND` unless `/app/profiles` exists.
+4. **Downloaded `profile.json` `loop` field and empty `ring_button.file` (Scenario 5)**:
+   `unifi_profile_read_from_lcm_gui_conf()` does not currently read `"loop"` from `ubnt_lcm_gui.conf`, so downloaded profiles always write `"loop": false`. Additionally, asset download currently requires `ring_button.file` to be non-empty.
+5. **Button entity discovery `state_topic` metadata**:
+   MQTT discovery payloads for Home Assistant `button` entities currently include an unintended `state_topic` field. Home Assistant ignores it on button entities, though it is visible when inspecting raw discovery JSON on the broker.
