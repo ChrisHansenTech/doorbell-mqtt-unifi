@@ -13,6 +13,7 @@ typedef struct mqtt_router_ctx {
     const config_ssh_t *ssh_cfg;
     const config_preset_t *preset_cfg;
     const config_unifi_t *unifi_cfg;
+    const config_default_assets_t *default_assets_cfg;
     const sfx_ctx_t *sfx_ctx;
     const char *state_dir;
 } mqtt_router_ctx_t;

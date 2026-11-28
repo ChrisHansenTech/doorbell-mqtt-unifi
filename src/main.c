@@ -98,10 +98,11 @@ int main(void) {
     sfx_ctx.sfx_preset_cfg = &cfg.sfx_preset_cfg;
     sfx_ctx.sounds_dir = sounds_dir;
 
-    mqtt_router_ctx_t inbound_ctx;
+    mqtt_router_ctx_t inbound_ctx = {0};
     inbound_ctx.ssh_cfg = &cfg.ssh_cfg;
     inbound_ctx.preset_cfg = &cfg.preset_cfg;
     inbound_ctx.unifi_cfg = &cfg.unifi_cfg;
+    inbound_ctx.default_assets_cfg = &cfg.default_assets_cfg;
     inbound_ctx.sfx_ctx = &sfx_ctx;
     inbound_ctx.state_dir = state_dir;
 

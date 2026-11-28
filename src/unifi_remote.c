@@ -239,14 +239,24 @@ static int unifi_create_asset_md5_file(const char *asset_file_path, const char *
     return ERROR_NONE;
 }
 
-static error_return_t unifi_stage_single_asset(ssh_session_t *session, const char* profile_dir
-    , const char *asset_filename, utils_file_class_t cls, const unifi_workdir_t *wd) {
-    if (!session || !profile_dir || !asset_filename || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
+static error_return_t unifi_stage_single_asset(
+    ssh_session_t *session,
+    const char *asset_dir,
+    const char *asset_filename,
+    utils_file_class_t cls,
+    bool is_default,
+    const unifi_workdir_t *wd
+) {
+    if (!session || !asset_dir || !asset_filename || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
         return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
 
+    const char *label = is_default
+        ? (cls == UTILS_FILE_CLASS_ANIMATION ? "Default welcome animation" : "Default ring button sound")
+        : "Profile asset";
+
     error_return_t err;
-    
+
     char asset_file_path[PATH_MAX];
     char md5_file_path[PATH_MAX];
     char remote_path[PATH_MAX];
@@ -257,34 +267,33 @@ static error_return_t unifi_stage_single_asset(ssh_session_t *session, const cha
         goto out;
     }
 
-    if (!utils_build_path(asset_file_path, sizeof(asset_file_path), profile_dir, asset_filename)) {
-        LOG_ERROR("Error building path for asset '%s/%s'", profile_dir, asset_filename);
-        err = error_createf(ERROR_PATH_TOO_LONG, "Error building path for asset %s", asset_filename);
+    if (!utils_build_path(asset_file_path, sizeof(asset_file_path), asset_dir, asset_filename)) {
+        LOG_ERROR("Error building path for %s '%s/%s'", label, asset_dir, asset_filename);
+        err = error_createf(ERROR_PATH_TOO_LONG, "Error building path for %s %s", label, asset_filename);
         goto out;
     }
 
     if (!utils_file_exists(asset_file_path)) {
-        LOG_ERROR("File '%s' does not exist", asset_file_path);
-        err = error_createf(ERROR_FILE_NOT_FOUND, "File %s does not exist", asset_filename);
+        LOG_ERROR("%s file '%s' does not exist", label, asset_file_path);
+        err = error_createf(ERROR_FILE_NOT_FOUND, "%s %s does not exist", label, asset_filename);
         goto out;
     }
 
     err = utils_is_valid_file(asset_file_path, cls);
     if (err.error_code != ERROR_NONE) {
-        err = error_wrap(err, "Profile asset '%s' validation failed", asset_filename);
+        err = error_wrap(err, "%s '%s' validation failed", label, asset_filename);
         goto out;
     }
-    
+
     int result = unifi_create_asset_md5_file(asset_file_path, asset_filename, wd->local_temp_dir, md5_file_path, sizeof(md5_file_path));
 
     if (result != ERROR_NONE) {
-        err = error_createf(result, "Failed to create MD5 hash for %s", asset_filename);
+        err = error_createf(result, "Failed to create MD5 hash for %s %s", label, asset_filename);
         goto out;
     }
 
-
     if (!utils_build_path(remote_path, sizeof(remote_path), wd->remote_temp_path, cls == UTILS_FILE_CLASS_ANIMATION ? "anim" : "sound")) {
-        err = error_createf(ERROR_PATH_TOO_LONG, "Error building path for asset %s", asset_filename);
+        err = error_createf(ERROR_PATH_TOO_LONG, "Error building path for %s %s", label, asset_filename);
         goto out;
     }
 
@@ -293,49 +302,61 @@ static error_return_t unifi_stage_single_asset(ssh_session_t *session, const cha
         goto out;
     }
 
-    if (!ssh_exec_command(session, ssh_cmd,NULL, NULL, NULL, NULL, NULL)) {
+    if (!ssh_exec_command(session, ssh_cmd, NULL, NULL, NULL, NULL, NULL)) {
         err = error_create(ERROR_SSH_COMMAND_FAILED, "Failed to execute SSH command");
         goto out;
     }
 
     if (!ssh_scp_upload_file(session, asset_file_path, remote_path, 0644)) {
-        err = error_createf(ERROR_PROFILE_UPLOAD_TRANSFER_FAILED, "Failed to upload %s", asset_filename);
+        err = error_createf(ERROR_PROFILE_UPLOAD_TRANSFER_FAILED, "Failed to upload %s %s", label, asset_filename);
         goto out;
     }
 
     if (!ssh_scp_upload_file(session, md5_file_path, remote_path, 0644)) {
-        err = error_createf(ERROR_PROFILE_UPLOAD_TRANSFER_FAILED, "Failed to upload MD5 file for %s", asset_filename);
+        err = error_createf(ERROR_PROFILE_UPLOAD_TRANSFER_FAILED, "Failed to upload MD5 file for %s %s", label, asset_filename);
         goto out;
     }
 
 out:
-
     return err;
 }
 
-static error_return_t unifi_stage_assets(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, const unifi_workdir_t *wd) {
-    if (!session || !profile_dir || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
+static error_return_t unifi_stage_effective_assets(ssh_session_t *session, const unifi_effective_profile_t *effective, const unifi_workdir_t *wd) {
+    if (!session || !effective || !wd || wd->local_temp_dir[0] == '\0' || !wd->remote_temp_path) {
         return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
 
     error_return_t err = error_none();
-    
-    if (profile->welcome.enabled) {
-        err = unifi_stage_single_asset(session, profile_dir, profile->welcome.file, UTILS_FILE_CLASS_ANIMATION, wd);
+
+    if (effective->profile.welcome.enabled) {
+        err = unifi_stage_single_asset(
+            session,
+            effective->welcome_dir,
+            effective->profile.welcome.file,
+            UTILS_FILE_CLASS_ANIMATION,
+            effective->welcome_is_default,
+            wd
+        );
         if (err.error_code != ERROR_NONE) {
             goto out;
         }
     }
 
-    if (profile->ring_button.enabled) {
-        err = unifi_stage_single_asset(session, profile_dir, profile->ring_button.file, UTILS_FILE_CLASS_SOUND, wd);
+    if (effective->profile.ring_button.enabled) {
+        err = unifi_stage_single_asset(
+            session,
+            effective->ring_button_dir,
+            effective->profile.ring_button.file,
+            UTILS_FILE_CLASS_SOUND,
+            effective->ring_button_is_default,
+            wd
+        );
         if (err.error_code != ERROR_NONE) {
             goto out;
         }
     }
 
 out:
-
     return err;
 }
 
@@ -790,17 +811,19 @@ error_return_t unifi_profile_upload_and_apply(ssh_session_t *session, const char
 }
 
 
-error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state) {
-    if (!session || !profile_dir || !profile) {
-        LOG_ERROR("Invalid parameters session=%p, profile_dir=%p, profile=%p", (void*)session, (void*)profile_dir , (void*)profile);
+error_return_t unifi_profile_upload_and_apply_effective(ssh_session_t *session, const unifi_effective_profile_t *effective, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state) {
+    if (!session || !effective) {
+        LOG_ERROR("Invalid parameters session=%p, effective=%p", (void *)session, (void *)effective);
         return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
     }
 
-    error_return_t err = error_none();
+    error_return_t err = unifi_effective_profile_validate_assets(effective);
+    if (err.error_code != ERROR_NONE) {
+        return err;
+    }
+
     int rc;
-
     unifi_workdir_t wd = {0};
-
     wd.remote_temp_path = "/tmp/doorbell-mqtt-unifi/profile";
 
     if ((rc = unifi_prepare_workdirs(session, &wd)) != ERROR_NONE) {
@@ -808,7 +831,7 @@ error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const c
         goto cleanup;
     }
 
-    err = unifi_stage_assets(session, profile_dir, profile, &wd);
+    err = unifi_stage_effective_assets(session, effective, &wd);
     if (err.error_code != ERROR_NONE) {
         goto cleanup;
     }
@@ -818,7 +841,7 @@ error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const c
         goto cleanup;
     }
 
-    if ((rc = unifi_stage_method_artifacts(session, profile, &wd, method)) != ERROR_NONE) {
+    if ((rc = unifi_stage_method_artifacts(session, &effective->profile, &wd, method)) != ERROR_NONE) {
         err = error_create(rc, NULL);
         goto cleanup;
     }
@@ -832,6 +855,20 @@ cleanup:
     unifi_cleanup_workdirs(session, &wd);
 
     return err;
+}
+
+error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state) {
+    if (!session || !profile_dir || !profile) {
+        LOG_ERROR("Invalid parameters session=%p, profile_dir=%p, profile=%p", (void *)session, (void *)profile_dir, (void *)profile);
+        return error_create(ERROR_INVALID_PARAMETERS, "Invalid parameters");
+    }
+
+    unifi_effective_profile_t effective = {0};
+    if (!unifi_profile_resolve_effective(profile, profile_dir, NULL, &effective)) {
+        return error_create(ERROR_PATH_TOO_LONG, "Profile directory path exceeds maximum length");
+    }
+
+    return unifi_profile_upload_and_apply_effective(session, &effective, method, applied_state);
 }
 
 error_return_t unifi_sfx_upload_and_play(ssh_session_t *session, const config_sfx_preset_item_t *sfx, const char *sounds_dir) {

@@ -166,6 +166,7 @@ static bool state_create_json(applied_state_t *state, const char *state_dir) {
     if (!cJSON_AddNumberToObject(root, "schemaVersion", 1) ||
         !cJSON_AddStringToObject(root, "profileName", state->profile_name) ||
         !cJSON_AddBoolToObject(root, "isPreset", state->is_preset) ||
+        !cJSON_AddBoolToObject(root, "isDefaultProfile", state->is_default_profile) ||
         !cJSON_AddStringToObject(root, "applyMethod", state->apply_method == UNIFI_APPLY_IPC ? "ipc" : "legacy") ||
         !cJSON_AddNumberToObject(root, "appliedAt", (double)state->applied_at) ||
         !cJSON_AddStringToObject(root, "hash", !state->hash ? "" : state->hash)) {
@@ -243,6 +244,11 @@ int state_load(applied_state_t *state, const char *state_dir) {
        state->is_preset = is_preset; 
     }
 
+    bool is_default_profile = false;
+    if (json_get_bool(root, "isDefaultProfile", &is_default_profile)) {
+        state->is_default_profile = is_default_profile;
+    }
+
     double applied_at = 0;
     if (json_get_double(root, "appliedAt", &applied_at)) {
         state->applied_at = (time_t)applied_at;
@@ -266,7 +272,7 @@ cleanup:
     return rc;
 }
 
-int state_save(profile_state_t *profile_state, const char *profile_name, bool is_preset, unifi_apply_method_t apply_method, const char *state_dir) {
+int state_save_ex(profile_state_t *profile_state, const char *profile_name, bool is_preset, bool is_default_profile, unifi_apply_method_t apply_method, const char *state_dir) {
     if (!profile_state || !profile_name || !state_dir) {
         LOG_ERROR("Invalid parameters profile_state=%p, profile_name=%p, state_dir==%p", (void*)profile_state, (void*)profile_name, (void*)state_dir);
         return ERROR_CONFIG_INVALID;
@@ -291,6 +297,7 @@ int state_save(profile_state_t *profile_state, const char *profile_name, bool is
     state.profile_name = strdup(profile_name);
     state.applied_at = applied_at;
     state.is_preset = is_preset;
+    state.is_default_profile = is_default_profile;
     state.apply_method = apply_method;
 
     if (!state_create_json(&state, state_dir)) {
@@ -303,6 +310,10 @@ cleanup:
     state_applied_free(&state);
 
     return rc;
+}
+
+int state_save(profile_state_t *profile_state, const char *profile_name, bool is_preset, unifi_apply_method_t apply_method, const char *state_dir) {
+    return state_save_ex(profile_state, profile_name, is_preset, false, apply_method, state_dir);
 }
 
 int state_compare(profile_state_t *active_state, applied_state_t *applied_state, char active_hash[65], const char *state_dir) {

@@ -192,6 +192,35 @@ void test_state_error_and_null_handling(void) {
     state_free_profile_state(NULL);
 }
 
+void test_state_default_profile_flag_roundtrip_and_backward_compat(void) {
+    profile_state_t ps = make_sample_state(false);
+
+    /* Virtual Default profile saves isDefaultProfile=true and loads it back */
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_save_ex(&ps, "Default", true, true, UNIFI_APPLY_IPC, g_tmp_dir));
+
+    applied_state_t loaded = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_tmp_dir));
+    TEST_ASSERT_EQUAL_STRING("Default", loaded.profile_name);
+    TEST_ASSERT_TRUE(loaded.is_preset);
+    TEST_ASSERT_TRUE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+
+    /* Existing legacy last_applied.json without isDefaultProfile defaults to false (user-defined Default preset) */
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/last_applied.json", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_write_text(
+        path,
+        "{\"schemaVersion\":1,\"profileName\":\"Default\",\"isPreset\":true,\"applyMethod\":\"ipc\",\"appliedAt\":1700000000,\"hash\":\"abc\"}"
+    ));
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_tmp_dir));
+    TEST_ASSERT_EQUAL_STRING("Default", loaded.profile_name);
+    TEST_ASSERT_TRUE(loaded.is_preset);
+    TEST_ASSERT_FALSE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+
+    state_free_profile_state(&ps);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -201,6 +230,7 @@ int main(void) {
     RUN_TEST(test_state_compare_detects_mismatch);
     RUN_TEST(test_state_compare_legacy_returns_validation_unavailable);
     RUN_TEST(test_state_error_and_null_handling);
+    RUN_TEST(test_state_default_profile_flag_roundtrip_and_backward_compat);
 
     return UNITY_END();
 }

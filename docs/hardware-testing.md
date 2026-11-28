@@ -69,6 +69,23 @@ The scenarios below describe the **permanent expected behavior** of the service.
 |---|---|---|---|---|
 | 13 | **Docker entrypoint and volumes** | Docker (`linux/amd64` or `linux/arm64`) | Start a fresh container with empty `/config`, `/profiles`, `/sounds` mounts and custom `PUID`/`PGID`. | Entrypoint initializes `/config/config.json` on first run, drops privileges to `PUID`/`PGID` via `gosu`, starts the service cleanly, and stops cleanly on `docker stop` (`SIGTERM`). |
 
+### Default Assets and Virtual `Default` Profile Validation
+
+Validate these scenarios in **IPC** mode (and repeat Scenarios 17, 18, 20, and 21 in **Legacy** mode to verify `.conf` patching and process restart behavior).
+
+| # | Scenario | Mode / Prereq | Steps | Expected Behavior |
+|---|---|---|---|---|
+| 14 | **Feature disabled baseline** | `defaultAssets` omitted or `enabled: false` | Start service, inspect **Presets** dropdown, and apply an existing preset. | `Default` does **not** appear in **Presets** (unless user-defined); existing profile apply behavior is unchanged. |
+| 15 | **Enable both default assets & discovery** | `defaultAssets.enabled = true`, both `welcome` and `ringButton` enabled with valid files in `/profiles/default-assets` | Restart service and inspect **Presets** dropdown in Home Assistant. | `Default` appears at the top of the **Presets** dropdown (immediately after `none` if present) without modifying `presets[]`; service does **not** auto-apply assets on startup. |
+| 16 | **Manual virtual `Default` apply** | Both default assets enabled (IPC & Legacy) | Select `Default` manually in Home Assistant **Presets**. | Doorbell displays default welcome animation and plays default ring sound on press; **Last applied profile** and **Presets** report `Default`; **Custom directory** clears; **Status** returns to `idle`; **Last error** clears to `0`. |
+| 17 | **Welcome-only profile uses default sound** | Both default assets enabled (IPC & Legacy) | Select a profile with `welcome.enabled: true` and `ringButton.enabled: false` (or omitted). | Doorbell displays the profile's animation and plays the **default ring sound** with default `volume`/`repeatTimes`; **Last applied profile** reports the selected profile name (not `Default`). |
+| 18 | **Sound-only profile uses default welcome** | Both default assets enabled (IPC & Legacy) | Select a profile with `welcome.enabled: false` (or omitted) and `ringButton.enabled: true`. | Doorbell displays the **default welcome animation** with default `count`/`durationMs`/`loop` and plays the profile's ring sound; **Last applied profile** reports the selected profile name. |
+| 19 | **Profile-specific precedence** | Both default assets enabled | Select a profile with both `welcome.enabled: true` and `ringButton.enabled: true`. | Both profile-specific assets are applied; neither default asset is uploaded or substituted. |
+| 20 | **Switch seasonal → `Default` & HA automation** | IPC & Legacy | Apply a seasonal preset, then trigger a Home Assistant automation/script calling `select.select_option` with `option: "Default"`. | Default animation and ring sound replace the seasonal assets on the doorbell; **Last applied profile** and **Presets** update to `Default`. |
+| 21 | **IPC validation, reapply, and restart restoration** | IPC mode | With `Default` (or a profile using defaults) active: (a) press **Validate profile**, (b) restart container, (c) update a default asset file in `config.json`, restart, and press **Reapply last profile**, then **Validate profile**. | (a) Reports `match`; (b) Restart restores **Last applied profile** and **Presets** without re-uploading; (c) **Reapply last profile** applies the updated default asset and subsequent **Validate profile** reports `match`. |
+| 22 | **Missing selected default asset & recovery** | `defaultAssets` enabled | Temporarily rename/move the configured default welcome file, select `Default`, then restore the file and retry without restarting the container. | Failed apply reports `ERROR_FILE_NOT_FOUND` (`1205`) naming the default welcome animation, returns **Status** to `idle`, and preserves previous **Last applied profile** and `last_applied.json`; retry after restoring the file succeeds cleanly. |
+| 23 | **Disable feature & verify unaffected workflows** | Set `defaultAssets.enabled = false` | Restart service, inspect **Presets** dropdown, trigger an **SFX preset**, and press **Asset download**. | `Default` is removed from retained MQTT discovery; **SFX presets** plays normally on doorbell speaker; **Asset download** saves the active doorbell config normally. |
+
 ---
 
 ## Automated Alternatives for Destructive Faults

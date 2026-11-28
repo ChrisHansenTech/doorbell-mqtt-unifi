@@ -383,7 +383,202 @@ void test_config_loads_example_config_cleanly(void) {
     TEST_ASSERT_EQUAL_INT(UNIFI_APPLY_IPC, cfg.unifi_cfg.apply_method);
     TEST_ASSERT_EQUAL_UINT(4, cfg.preset_cfg.count);
     TEST_ASSERT_EQUAL_INT(100, cfg.sfx_preset_cfg.default_volume);
+    TEST_ASSERT_FALSE(cfg.default_assets_cfg.enabled);
     config_free(&cfg);
+}
+
+/* ===== Issue #11: defaultAssets configuration tests ===== */
+
+void test_config_default_assets_enabled_full_and_playback_defaults(void) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/default_assets_full.json", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_write_text(
+        path,
+        "{\n"
+        "  \"mqtt\": {},\n"
+        "  \"ssh\": {},\n"
+        "  \"unifi\": { \"apply_method\": \"ipc\" },\n"
+        "  \"presets\": [ { \"name\": \"Christmas\", \"directory\": \"christmas\" } ],\n"
+        "  \"defaultAssets\": {\n"
+        "    \"enabled\": true,\n"
+        "    \"directory\": \"/profiles/default-assets\",\n"
+        "    \"welcome\": {\n"
+        "      \"enabled\": true,\n"
+        "      \"file\": \"default-welcome.png\",\n"
+        "      \"count\": 12,\n"
+        "      \"durationMs\": 2500,\n"
+        "      \"loop\": true\n"
+        "    },\n"
+        "    \"ringButton\": {\n"
+        "      \"enabled\": true,\n"
+        "      \"file\": \"default-ring.ogg\",\n"
+        "      \"repeatTimes\": 2,\n"
+        "      \"volume\": 85\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    ));
+
+    config_t cfg = {0};
+    TEST_ASSERT_TRUE(config_load(path, &cfg));
+    TEST_ASSERT_TRUE(cfg.default_assets_cfg.enabled);
+    TEST_ASSERT_TRUE(config_default_assets_available(&cfg.default_assets_cfg));
+    TEST_ASSERT_EQUAL_STRING("/profiles/default-assets", cfg.default_assets_cfg.directory);
+    TEST_ASSERT_TRUE(cfg.default_assets_cfg.welcome.enabled);
+    TEST_ASSERT_EQUAL_STRING("default-welcome.png", cfg.default_assets_cfg.welcome.file);
+    TEST_ASSERT_EQUAL_INT(12, cfg.default_assets_cfg.welcome.count);
+    TEST_ASSERT_EQUAL_INT(2500, cfg.default_assets_cfg.welcome.duration_ms);
+    TEST_ASSERT_TRUE(cfg.default_assets_cfg.welcome.loop);
+    TEST_ASSERT_TRUE(cfg.default_assets_cfg.ring_button.enabled);
+    TEST_ASSERT_EQUAL_STRING("default-ring.ogg", cfg.default_assets_cfg.ring_button.file);
+    TEST_ASSERT_EQUAL_INT(2, cfg.default_assets_cfg.ring_button.repeat_times);
+    TEST_ASSERT_EQUAL_INT(85, cfg.default_assets_cfg.ring_button.volume);
+    config_free(&cfg);
+
+    /* Optional playback properties use documented defaults */
+    snprintf(path, sizeof(path), "%s/default_assets_defaults.json", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_write_text(
+        path,
+        "{\n"
+        "  \"mqtt\": {},\n"
+        "  \"ssh\": {},\n"
+        "  \"unifi\": {},\n"
+        "  \"defaultAssets\": {\n"
+        "    \"enabled\": true,\n"
+        "    \"directory\": \"/profiles/defaults\",\n"
+        "    \"welcome\": { \"enabled\": true, \"file\": \"w.png\" },\n"
+        "    \"ringButton\": { \"enabled\": true, \"file\": \"r.wav\" }\n"
+        "  }\n"
+        "}\n"
+    ));
+
+    memset(&cfg, 0, sizeof(cfg));
+    TEST_ASSERT_TRUE(config_load(path, &cfg));
+    TEST_ASSERT_EQUAL_INT(1, cfg.default_assets_cfg.welcome.count);
+    TEST_ASSERT_EQUAL_INT(3000, cfg.default_assets_cfg.welcome.duration_ms);
+    TEST_ASSERT_FALSE(cfg.default_assets_cfg.welcome.loop);
+    TEST_ASSERT_EQUAL_INT(1, cfg.default_assets_cfg.ring_button.repeat_times);
+    TEST_ASSERT_EQUAL_INT(100, cfg.default_assets_cfg.ring_button.volume);
+    config_free(&cfg);
+
+    /* Individual asset enable/disable and global enabled with neither asset enabled */
+    snprintf(path, sizeof(path), "%s/default_assets_none_enabled.json", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_write_text(
+        path,
+        "{\n"
+        "  \"mqtt\": {},\n"
+        "  \"ssh\": {},\n"
+        "  \"defaultAssets\": { \"enabled\": true, \"welcome\": { \"enabled\": false }, \"ringButton\": { \"enabled\": false } }\n"
+        "}\n"
+    ));
+    memset(&cfg, 0, sizeof(cfg));
+    TEST_ASSERT_TRUE(config_load(path, &cfg));
+    TEST_ASSERT_EQUAL_INT(UNIFI_APPLY_LEGACY, cfg.unifi_cfg.apply_method); /* unifi backward compat preserved */
+    TEST_ASSERT_TRUE(cfg.default_assets_cfg.enabled);
+    TEST_ASSERT_FALSE(config_default_assets_available(&cfg.default_assets_cfg));
+    config_free(&cfg);
+}
+
+void test_config_default_assets_disabled_preserves_legacy_and_default_preset(void) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/default_assets_disabled.json", g_tmp_dir);
+    /* Disabled defaultAssets with invalid inactive fields AND a user preset named Default must succeed */
+    TEST_ASSERT_TRUE(test_write_text(
+        path,
+        "{\n"
+        "  \"mqtt\": {},\n"
+        "  \"ssh\": {},\n"
+        "  \"unifi\": {},\n"
+        "  \"presets\": [ { \"name\": \"Default\", \"directory\": \"my_default\" } ],\n"
+        "  \"defaultAssets\": {\n"
+        "    \"enabled\": false,\n"
+        "    \"welcome\": { \"enabled\": true, \"file\": \"bad.jpg\", \"count\": -5 }\n"
+        "  }\n"
+        "}\n"
+    ));
+
+    config_t cfg = {0};
+    TEST_ASSERT_TRUE(config_load(path, &cfg));
+    TEST_ASSERT_FALSE(cfg.default_assets_cfg.enabled);
+    TEST_ASSERT_EQUAL_UINT(1, cfg.preset_cfg.count);
+    TEST_ASSERT_EQUAL_STRING("Default", cfg.preset_cfg.items[0].display_name);
+    config_free(&cfg);
+}
+
+void test_config_default_assets_rejects_preset_name_conflicts_case_insensitive(void) {
+    const char *conflict_names[] = { "Default", "DEFAULT", "default", "  DeFaUlT  " };
+    for (size_t i = 0; i < sizeof(conflict_names) / sizeof(conflict_names[0]); i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/conflict_%zu.json", g_tmp_dir, i);
+        char json[512];
+        snprintf(
+            json,
+            sizeof(json),
+            "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},"
+            "\"presets\":[{\"name\":\"%s\",\"directory\":\"def\"}],"
+            "\"defaultAssets\":{\"enabled\":true,\"directory\":\"/profiles/def\","
+            "\"welcome\":{\"enabled\":true,\"file\":\"w.png\"}}}",
+            conflict_names[i]
+        );
+        TEST_ASSERT_TRUE(test_write_text(path, json));
+
+        config_t cfg = {0};
+        TEST_ASSERT_FALSE(config_load(path, &cfg));
+        config_free(&cfg);
+    }
+}
+
+void test_config_default_assets_validation_errors(void) {
+    const char *invalid_configs[] = {
+        /* defaultAssets not an object */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":\"yes\"}",
+        /* enabled not a bool */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":\"true\"}}",
+        /* directory not a string */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":123}}",
+        /* missing directory when an asset is enabled */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"welcome\":{\"enabled\":true,\"file\":\"a.png\"}}}",
+        /* welcome not an object */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":true}}",
+        /* welcome.enabled not bool */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":1}}}",
+        /* welcome missing file */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true}}}",
+        /* welcome invalid filename extension */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"a.jpg\"}}}",
+        /* welcome path traversal filename */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"../a.png\"}}}",
+        /* welcome invalid count */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"a.png\",\"count\":0}}}",
+        /* welcome count wrong type */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"a.png\",\"count\":\"1\"}}}",
+        /* welcome invalid durationMs */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"a.png\",\"durationMs\":0}}}",
+        /* welcome loop wrong type */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"welcome\":{\"enabled\":true,\"file\":\"a.png\",\"loop\":\"no\"}}}",
+        /* ringButton not an object */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":[]}}",
+        /* ringButton missing file */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":{\"enabled\":true}}}",
+        /* ringButton invalid filename */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":{\"enabled\":true,\"file\":\"s.mp3\"}}}",
+        /* ringButton invalid repeatTimes */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":{\"enabled\":true,\"file\":\"s.ogg\",\"repeatTimes\":0}}}",
+        /* ringButton volume too low */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":{\"enabled\":true,\"file\":\"s.ogg\",\"volume\":0}}}",
+        /* ringButton volume too high */
+        "{\"mqtt\":{},\"ssh\":{},\"unifi\":{},\"defaultAssets\":{\"enabled\":true,\"directory\":\"/d\",\"ringButton\":{\"enabled\":true,\"file\":\"s.ogg\",\"volume\":101}}}"
+    };
+
+    for (size_t i = 0; i < sizeof(invalid_configs) / sizeof(invalid_configs[0]); i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/bad_def_%zu.json", g_tmp_dir, i);
+        TEST_ASSERT_TRUE(test_write_text(path, invalid_configs[i]));
+
+        config_t cfg = {0};
+        TEST_ASSERT_FALSE_MESSAGE(config_load(path, &cfg), invalid_configs[i]);
+        config_free(&cfg);
+    }
 }
 
 int main(void) {
@@ -415,6 +610,12 @@ int main(void) {
     RUN_TEST(test_config_skips_preset_with_invalid_directory_name);
     RUN_TEST(test_config_sfx_volume_rules_and_duplicate_skipping);
     RUN_TEST(test_config_loads_example_config_cleanly);
+
+    /* Issue #11: defaultAssets configuration tests */
+    RUN_TEST(test_config_default_assets_enabled_full_and_playback_defaults);
+    RUN_TEST(test_config_default_assets_disabled_preserves_legacy_and_default_preset);
+    RUN_TEST(test_config_default_assets_rejects_preset_name_conflicts_case_insensitive);
+    RUN_TEST(test_config_default_assets_validation_errors);
 
     return UNITY_END();
 }

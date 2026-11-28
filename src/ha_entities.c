@@ -3,6 +3,7 @@
 #include "config.h"
 
 #include "cJSON.h"
+#include <strings.h>
 
 
 
@@ -15,8 +16,20 @@ static options_result_t add_preset_options(cJSON *root, const config_t *cfg, con
         return OPTIONS_ERR_UNKNOWN;
     }
 
-    for(size_t i = 0; i < cfg->preset_cfg.count; i++) {
+    bool include_default = config_default_assets_available(&cfg->default_assets_cfg);
+    bool first_is_none = cfg->preset_cfg.count > 0 &&
+                         cfg->preset_cfg.items[0].display_name != NULL &&
+                         strcasecmp(cfg->preset_cfg.items[0].display_name, "none") == 0;
+
+    if (include_default && !first_is_none) {
+        cJSON_AddItemToArray(presets, cJSON_CreateString(DEFAULT_PROFILE_NAME));
+    }
+
+    for (size_t i = 0; i < cfg->preset_cfg.count; i++) {
         cJSON_AddItemToArray(presets, cJSON_CreateString(cfg->preset_cfg.items[i].display_name));
+        if (include_default && first_is_none && i == 0) {
+            cJSON_AddItemToArray(presets, cJSON_CreateString(DEFAULT_PROFILE_NAME));
+        }
     }
 
     return OPTIONS_OK;

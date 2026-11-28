@@ -29,6 +29,7 @@ Designed for reliability, speed, and clean Home Assistant integration.
 ## Why Use It?
 
 - Apply animation & sound changes in under 2 seconds (IPC mode)
+- Optional global default assets with automatic profile fallback and a virtual `Default` Home Assistant preset
 - Ad-hoc doorbell SFX
 - Native Home Assistant MQTT Discovery integration
 - Clean multi-doorbell support (one container per device)

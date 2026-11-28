@@ -1,6 +1,10 @@
 #pragma once
 
+#include <linux/limits.h>
+#include <stdbool.h>
 #include <stddef.h>
+
+#define DEFAULT_PROFILE_NAME "Default"
 
 typedef enum {
     UNIFI_APPLY_LEGACY = 0,
@@ -65,9 +69,36 @@ typedef struct {
 } config_unifi_t;
 
 typedef struct {
+    bool enabled;
+    char file[256];
+    int count;
+    int duration_ms;
+    bool loop;
+} config_default_welcome_t;
+
+typedef struct {
+    bool enabled;
+    char file[256];
+    int repeat_times;
+    int volume;
+} config_default_ring_button_t;
+
+typedef struct {
+    bool enabled;
+    char directory[PATH_MAX];
+    config_default_welcome_t welcome;
+    config_default_ring_button_t ring_button;
+} config_default_assets_t;
+
+static inline bool config_default_assets_available(const config_default_assets_t *cfg) {
+    return cfg && cfg->enabled && (cfg->welcome.enabled || cfg->ring_button.enabled);
+}
+
+typedef struct {
     config_mqtt_t mqtt_cfg;
     config_ssh_t ssh_cfg;
     config_preset_t preset_cfg;
     config_sfx_preset_t sfx_preset_cfg;
     config_unifi_t unifi_cfg;
+    config_default_assets_t default_assets_cfg;
 } config_t;

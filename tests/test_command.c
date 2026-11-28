@@ -177,6 +177,7 @@ void setUp(void) {
     g_ctx.ssh_cfg = &g_cfg.ssh_cfg;
     g_ctx.preset_cfg = &g_cfg.preset_cfg;
     g_ctx.unifi_cfg = &g_cfg.unifi_cfg;
+    g_ctx.default_assets_cfg = &g_cfg.default_assets_cfg;
     g_ctx.sfx_ctx = &g_sfx_ctx;
     g_ctx.state_dir = g_state_dir;
 
@@ -657,6 +658,261 @@ void test_command_retry_succeeds_after_ssh_timeout(void) {
     cJSON_Delete(err);
 }
 
+/* ===== Issue #11: Default assets & virtual Default profile command tests ===== */
+
+static void setup_default_assets_dir_and_cfg(char *out_dir, size_t out_dir_len, bool welcome_en, bool ring_en) {
+    snprintf(out_dir, out_dir_len, "%s/default-assets", g_profiles_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(out_dir));
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/def-welcome.png", out_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(path));
+    snprintf(path, sizeof(path), "%s/def-ring.ogg", out_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_ogg(path));
+
+    g_cfg.default_assets_cfg.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.directory, sizeof(g_cfg.default_assets_cfg.directory), "%s", out_dir);
+    g_cfg.default_assets_cfg.welcome.enabled = welcome_en;
+    snprintf(g_cfg.default_assets_cfg.welcome.file, sizeof(g_cfg.default_assets_cfg.welcome.file), "def-welcome.png");
+    g_cfg.default_assets_cfg.welcome.count = 5;
+    g_cfg.default_assets_cfg.welcome.duration_ms = 2500;
+    g_cfg.default_assets_cfg.welcome.loop = false;
+    g_cfg.default_assets_cfg.ring_button.enabled = ring_en;
+    snprintf(g_cfg.default_assets_cfg.ring_button.file, sizeof(g_cfg.default_assets_cfg.ring_button.file), "def-ring.ogg");
+    g_cfg.default_assets_cfg.ring_button.repeat_times = 1;
+    g_cfg.default_assets_cfg.ring_button.volume = 90;
+}
+
+void test_command_virtual_default_profile_apply_and_unavailable_rejection(void) {
+    /* 1. Disabled feature -> requesting Default fails with ERROR_PROFILE_NOT_FOUND */
+    mock_mqtt_reset();
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+    cJSON *err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_EQUAL_INT(ERROR_PROFILE_NOT_FOUND, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    /* 2. Enabled globally, neither asset enabled -> rejected cleanly */
+    g_cfg.default_assets_cfg.enabled = true;
+    mock_mqtt_reset();
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_EQUAL_INT(ERROR_PROFILE_NOT_FOUND, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    /* 3. Enabled with both default assets -> applies cleanly, persists isDefaultProfile=true */
+    char def_dir[512];
+    setup_default_assets_dir_and_cfg(def_dir, sizeof(def_dir), true, true);
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_NOT_NULL(mock_mqtt_find_last_publish("/status"));
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NOT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_NOT_NULL(mock_mqtt_find_last_publish("/preset/selected"));
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/preset/selected")->payload);
+    TEST_ASSERT_NOT_NULL(mock_mqtt_find_last_publish("/custom/directory"));
+    TEST_ASSERT_EQUAL_STRING("", mock_mqtt_find_last_publish("/custom/directory")->payload);
+    err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/default-assets/def-welcome.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/default-assets/def-ring.ogg"));
+
+    applied_state_t loaded = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_state_dir));
+    TEST_ASSERT_EQUAL_STRING("Default", loaded.profile_name);
+    TEST_ASSERT_TRUE(loaded.is_preset);
+    TEST_ASSERT_TRUE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+}
+
+void test_command_automatic_default_substitution_across_preset_custom_and_test_config(void) {
+    char def_dir[512];
+    setup_default_assets_dir_and_cfg(def_dir, sizeof(def_dir), true, true);
+
+    /* Rewrite christmas preset to enable welcome ONLY (ringButton disabled) */
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s/christmas", g_profiles_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(dir, "anim.png", "ring.ogg", true, false));
+
+    /* 1. Preset applies profile image + default sound, retains "Christmas" identity */
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+    command_set_preset(&g_ctx, "Christmas", 9);
+
+    TEST_ASSERT_EQUAL_STRING("Christmas", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("Christmas", mock_mqtt_find_last_publish("/preset/selected")->payload);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/christmas/anim.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/default-assets/def-ring.ogg"));
+
+    applied_state_t loaded = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_state_dir));
+    TEST_ASSERT_EQUAL_STRING("Christmas", loaded.profile_name);
+    TEST_ASSERT_FALSE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+
+    /* 2. Custom directory with sound ONLY -> uses default welcome + custom sound, retains "my_custom" identity */
+    snprintf(dir, sizeof(dir), "%s/my_custom", g_profiles_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(dir, "anim.png", "ring.ogg", false, true));
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+    command_apply_custom(&g_ctx, "my_custom", 9);
+
+    TEST_ASSERT_EQUAL_STRING("my_custom", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("none", mock_mqtt_find_last_publish("/preset/selected")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/default-assets/def-welcome.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/my_custom/ring.ogg"));
+
+    /* 3. Test config with both disabled -> uses both defaults, retains "test-config" identity */
+    snprintf(dir, sizeof(dir), "%s/test-profile", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(dir, "anim.png", "ring.ogg", false, false));
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+    command_test_config(&g_ctx, "PRESS", 5);
+
+    TEST_ASSERT_EQUAL_STRING("test-config", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/default-assets/def-welcome.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/default-assets/def-ring.ogg"));
+}
+
+void test_command_reapply_default_profile_and_conflict_after_disabling(void) {
+    char def_dir[512];
+    setup_default_assets_dir_and_cfg(def_dir, sizeof(def_dir), true, true);
+
+    /* 1. Apply virtual Default profile */
+    command_set_preset(&g_ctx, "Default", 7);
+
+    /* 2. Update default welcome file to a new asset and reapply -> uses updated default */
+    char new_png[PATH_MAX];
+    snprintf(new_png, sizeof(new_png), "%s/def-welcome-v2.png", def_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(new_png));
+    snprintf(g_cfg.default_assets_cfg.welcome.file, sizeof(g_cfg.default_assets_cfg.welcome.file), "def-welcome-v2.png");
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+    command_reapply_last_profile(&g_ctx, "PRESS", 5);
+
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/default-assets/def-welcome-v2.png"));
+
+    /* 3. Disable defaultAssets AND add a user-defined preset named "Default" -> reapply MUST reject, not confuse! */
+    g_cfg.default_assets_cfg.enabled = false;
+    char user_def_dir[PATH_MAX];
+    snprintf(user_def_dir, sizeof(user_def_dir), "%s/user_default", g_profiles_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(user_def_dir, "anim.png", "ring.ogg", true, true));
+
+    profiles_repo_shutdown();
+    free(g_cfg.preset_cfg.items[0].display_name);
+    free(g_cfg.preset_cfg.items[0].key_name);
+    free(g_cfg.preset_cfg.items[0].directory);
+    g_cfg.preset_cfg.items[0].display_name = strdup("Default");
+    g_cfg.preset_cfg.items[0].key_name = strdup("default");
+    g_cfg.preset_cfg.items[0].directory = strdup("user_default");
+    TEST_ASSERT_TRUE(profiles_repo_init(g_profiles_dir, &g_cfg.preset_cfg));
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+    command_reapply_last_profile(&g_ctx, "PRESS", 5);
+
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_ssh.create_calls); /* never connected or applied unintended preset */
+    cJSON *err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(ERROR_PROFILE_NOT_FOUND, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    /* 4. Selecting the user-defined "Default" preset explicitly while feature is disabled works normally! */
+    mock_mqtt_reset();
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/user_default/anim.png"));
+
+    applied_state_t loaded = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_state_dir));
+    TEST_ASSERT_FALSE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+}
+
+void test_command_default_asset_failure_preserves_state_and_allows_retry(void) {
+    /* First apply valid Christmas preset */
+    command_set_preset(&g_ctx, "Christmas", 9);
+
+    /* Enable defaults pointing to missing welcome asset */
+    char def_dir[512];
+    snprintf(def_dir, sizeof(def_dir), "%s/def_fail", g_profiles_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(def_dir));
+
+    g_cfg.default_assets_cfg.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.directory, sizeof(g_cfg.default_assets_cfg.directory), "%s", def_dir);
+    g_cfg.default_assets_cfg.welcome.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.welcome.file, sizeof(g_cfg.default_assets_cfg.welcome.file), "def.png");
+    g_cfg.default_assets_cfg.welcome.count = 1;
+    g_cfg.default_assets_cfg.welcome.duration_ms = 3000;
+
+    mock_mqtt_reset();
+    mock_ssh_reset();
+    g_mock_ssh.exec_cb = cmd_exec_cb;
+    g_mock_ssh.upload_cb = cmd_upload_cb;
+    g_mock_ssh.download_cb = cmd_download_cb;
+
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("/last_applied_profile"));
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_ssh.create_calls); /* failed local validation before SSH */
+    cJSON *err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_NOT_FOUND, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+
+    /* Previous successful persisted state ("Christmas") is preserved */
+    applied_state_t loaded = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_load(&loaded, g_state_dir));
+    TEST_ASSERT_EQUAL_STRING("Christmas", loaded.profile_name);
+    TEST_ASSERT_FALSE(loaded.is_default_profile);
+    state_applied_free(&loaded);
+
+    /* Place valid asset and retry without restart -> succeeds */
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/def.png", def_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(fpath));
+
+    mock_mqtt_reset();
+    command_set_preset(&g_ctx, "Default", 7);
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    err = cJSON_Parse(mock_mqtt_find_last_publish("/last_error")->payload);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(err);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -677,6 +933,12 @@ int main(void) {
     /* Issue #47: SSH TCP connect timeout error propagation and status recovery */
     RUN_TEST(test_command_ssh_timeout_propagates_error_and_recovers_status_all_workflows);
     RUN_TEST(test_command_retry_succeeds_after_ssh_timeout);
+
+    /* Issue #11: Default assets & virtual Default profile tests */
+    RUN_TEST(test_command_virtual_default_profile_apply_and_unavailable_rejection);
+    RUN_TEST(test_command_automatic_default_substitution_across_preset_custom_and_test_config);
+    RUN_TEST(test_command_reapply_default_profile_and_conflict_after_disabling);
+    RUN_TEST(test_command_default_asset_failure_preserves_state_and_allows_retry);
 
     return UNITY_END();
 }

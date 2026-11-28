@@ -282,6 +282,145 @@ void test_ha_mqtt_bind_connect_restore_and_disconnect(void) {
     TEST_ASSERT_EQUAL_STRING("offline", mock_mqtt_find_last_publish("/availability")->payload);
 }
 
+void test_ha_discovery_virtual_default_preset_option_placement_and_visibility(void) {
+    /* 1. Enabled with both default assets -> Default placed first before user presets */
+    g_cfg.default_assets_cfg.enabled = true;
+    g_cfg.default_assets_cfg.welcome.enabled = true;
+    g_cfg.default_assets_cfg.ring_button.enabled = true;
+
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    const mock_mqtt_publish_t *preset_pub = mock_mqtt_find_last_publish("_preset/config");
+    TEST_ASSERT_NOT_NULL(preset_pub);
+    cJSON *root = cJSON_Parse(preset_pub->payload);
+    TEST_ASSERT_NOT_NULL(root);
+    cJSON *opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("Default", cJSON_GetArrayItem(opts, 0)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Christmas", cJSON_GetArrayItem(opts, 1)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Labor Day", cJSON_GetArrayItem(opts, 2)->valuestring);
+    cJSON_Delete(root);
+
+    /* 2. Enabled with only welcome asset -> Default still advertised */
+    g_cfg.default_assets_cfg.ring_button.enabled = false;
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    root = cJSON_Parse(mock_mqtt_find_last_publish("_preset/config")->payload);
+    opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("Default", cJSON_GetArrayItem(opts, 0)->valuestring);
+    cJSON_Delete(root);
+
+    /* 3. Enabled globally but neither asset enabled -> Default NOT advertised */
+    g_cfg.default_assets_cfg.welcome.enabled = false;
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    root = cJSON_Parse(mock_mqtt_find_last_publish("_preset/config")->payload);
+    opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("Christmas", cJSON_GetArrayItem(opts, 0)->valuestring);
+    cJSON_Delete(root);
+
+    /* 4. No user-defined presets + default ring enabled -> options has ["Default"] */
+    for (size_t i = 0; i < g_cfg.preset_cfg.count; i++) {
+        free(g_cfg.preset_cfg.items[i].display_name);
+        free(g_cfg.preset_cfg.items[i].key_name);
+        free(g_cfg.preset_cfg.items[i].directory);
+    }
+    free(g_cfg.preset_cfg.items);
+    g_cfg.preset_cfg.items = NULL;
+    g_cfg.preset_cfg.count = 0;
+    g_cfg.default_assets_cfg.ring_button.enabled = true;
+
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    root = cJSON_Parse(mock_mqtt_find_last_publish("_preset/config")->payload);
+    opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("Default", cJSON_GetArrayItem(opts, 0)->valuestring);
+    cJSON_Delete(root);
+
+    /* 5. If "none" is first option in presets, Default is placed immediately after "none" */
+    g_cfg.preset_cfg.count = 2;
+    g_cfg.preset_cfg.items = calloc(2, sizeof(*g_cfg.preset_cfg.items));
+    g_cfg.preset_cfg.items[0].display_name = strdup("none");
+    g_cfg.preset_cfg.items[0].key_name = strdup("none");
+    g_cfg.preset_cfg.items[0].directory = strdup("none");
+    g_cfg.preset_cfg.items[1].display_name = strdup("Christmas");
+    g_cfg.preset_cfg.items[1].key_name = strdup("christmas");
+    g_cfg.preset_cfg.items[1].directory = strdup("christmas");
+
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    root = cJSON_Parse(mock_mqtt_find_last_publish("_preset/config")->payload);
+    opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_EQUAL_INT(3, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("none", cJSON_GetArrayItem(opts, 0)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Default", cJSON_GetArrayItem(opts, 1)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Christmas", cJSON_GetArrayItem(opts, 2)->valuestring);
+    cJSON_Delete(root);
+
+    /* 6. Restart/reconnect after applying virtual Default restores Default state cleanly */
+    profile_state_t ps = {0};
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, state_save_ex(&ps, "Default", true, true, UNIFI_APPLY_IPC, g_tmp_dir));
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_mqtt_bind(&g_cfg, g_tmp_dir));
+    g_mock_mqtt.on_connect_fn(false, g_mock_mqtt.on_connect_user);
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/preset/selected")->payload);
+    TEST_ASSERT_EQUAL_STRING("", mock_mqtt_find_last_publish("/custom/directory")->payload);
+}
+
+static void replace_presets_with_generated(config_t *cfg, size_t count, const char *prefix) {
+    for (size_t i = 0; i < cfg->preset_cfg.count; i++) {
+        free(cfg->preset_cfg.items[i].display_name);
+        free(cfg->preset_cfg.items[i].key_name);
+        free(cfg->preset_cfg.items[i].directory);
+    }
+    free(cfg->preset_cfg.items);
+    cfg->preset_cfg.items = calloc(count, sizeof(*cfg->preset_cfg.items));
+    TEST_ASSERT_NOT_NULL(cfg->preset_cfg.items);
+    cfg->preset_cfg.count = count;
+
+    for (size_t i = 0; i < count; i++) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s_%03zu", prefix, i);
+        cfg->preset_cfg.items[i].display_name = strdup(buf);
+        cfg->preset_cfg.items[i].key_name = strdup(buf);
+        cfg->preset_cfg.items[i].directory = strdup(buf);
+    }
+}
+
+void test_ha_discovery_large_payload_over_1024_and_overflow_detection(void) {
+    /* 1. Payload exceeding the original 1024-byte buffer succeeds within 4096 bytes */
+    g_cfg.default_assets_cfg.enabled = true;
+    g_cfg.default_assets_cfg.welcome.enabled = true;
+    replace_presets_with_generated(&g_cfg, 45, "Seasonal_Holiday_Theme");
+
+    mock_mqtt_reset();
+    TEST_ASSERT_TRUE(ha_publish_discovery(&g_cfg));
+    const mock_mqtt_publish_t *preset_pub = mock_mqtt_find_last_publish("_preset/config");
+    TEST_ASSERT_NOT_NULL(preset_pub);
+    TEST_ASSERT_TRUE(strlen(preset_pub->payload) > 1024);
+
+    cJSON *root = cJSON_Parse(preset_pub->payload);
+    TEST_ASSERT_NOT_NULL(root);
+    cJSON *opts = cJSON_GetObjectItem(root, "options");
+    TEST_ASSERT_TRUE(cJSON_IsArray(opts));
+    TEST_ASSERT_EQUAL_INT(46, cJSON_GetArraySize(opts));
+    TEST_ASSERT_EQUAL_STRING("Default", cJSON_GetArrayItem(opts, 0)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Seasonal_Holiday_Theme_000", cJSON_GetArrayItem(opts, 1)->valuestring);
+    TEST_ASSERT_EQUAL_STRING("Seasonal_Holiday_Theme_044", cJSON_GetArrayItem(opts, 45)->valuestring);
+    cJSON_Delete(root);
+
+    /* 2. Payload exceeding the 4096-byte buffer is detected, returns false, and is NOT published truncated */
+    replace_presets_with_generated(&g_cfg, 200, "Very_Long_Seasonal_Preset_Display_Name");
+
+    mock_mqtt_reset();
+    TEST_ASSERT_FALSE(ha_publish_discovery(&g_cfg));
+    TEST_ASSERT_NULL(mock_mqtt_find_last_publish("_preset/config"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -291,6 +430,8 @@ int main(void) {
     RUN_TEST(test_ha_discovery_custom_instance_namespacing);
     RUN_TEST(test_ha_status_publishers_and_error_dedup);
     RUN_TEST(test_ha_mqtt_bind_connect_restore_and_disconnect);
+    RUN_TEST(test_ha_discovery_virtual_default_preset_option_placement_and_visibility);
+    RUN_TEST(test_ha_discovery_large_payload_over_1024_and_overflow_detection);
 
     return UNITY_END();
 }
