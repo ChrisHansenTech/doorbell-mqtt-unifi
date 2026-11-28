@@ -441,3 +441,68 @@ Most users only need:
 - `ssh.host`
 - `UNIFI_PROTECT_RECOVERY_CODE` (environment variable)
 - `presets` (if they want custom names/directories)
+
+---
+
+## Default Assets Section (`defaultAssets`)
+
+The optional `defaultAssets` section lets you configure shared fallback assets for profiles and expose a virtual `Default` preset in Home Assistant.
+
+- The entire `defaultAssets` section is optional and **disabled by default** (`enabled: false`).
+- Existing `config.json` files without `defaultAssets` continue operating unchanged.
+- Environment variable overrides are not used for `defaultAssets`; restart the service after updating `config.json`.
+- Store default assets inside an existing mounted directory (for example, `/profiles/default-assets`) so no extra Docker volume mount is needed.
+
+### Example `defaultAssets` Configuration
+
+```json
+{
+  "defaultAssets": {
+    "enabled": true,
+    "directory": "/profiles/default-assets",
+    "welcome": {
+      "enabled": true,
+      "file": "default-welcome.png",
+      "count": 1,
+      "durationMs": 3000,
+      "loop": false
+    },
+    "ringButton": {
+      "enabled": true,
+      "file": "default-ring.ogg",
+      "repeatTimes": 1,
+      "volume": 100
+    }
+  }
+}
+```
+
+### Properties, Defaults, and Valid Ranges
+
+| Property | Type | Required | Default | Valid Values / Notes |
+|---|---|---|---|---|
+| `defaultAssets.enabled` | boolean | No | `false` | Globally enables default asset substitution and the virtual `Default` preset. When `false`, inactive properties are ignored. |
+| `defaultAssets.directory` | string | When any default asset is enabled | `""` | Runtime filesystem path containing default assets (no `profile.json` required). |
+| `defaultAssets.welcome.enabled` | boolean | No | `false` | Enables the default welcome animation (`guiId: "WELCOME"`). |
+| `defaultAssets.welcome.file` | string | When `welcome.enabled` is `true` | `""` | Valid `.png` filename (no path separators or `..`). |
+| `defaultAssets.welcome.count` | integer | No | `1` | Integer `>= 1` (frame count matching the sprite sheet). |
+| `defaultAssets.welcome.durationMs` | integer | No | `3000` | Integer `>= 1` (total animation duration in milliseconds). |
+| `defaultAssets.welcome.loop` | boolean | No | `false` | `true` loops continuously; `false` plays once. |
+| `defaultAssets.ringButton.enabled` | boolean | No | `false` | Enables the default ring button sound (`soundStateName: "RING_BUTTON_PRESSED"`). |
+| `defaultAssets.ringButton.file` | string | When `ringButton.enabled` is `true` | `""` | Valid `.ogg` or `.wav` filename (no path separators or `..`). |
+| `defaultAssets.ringButton.repeatTimes` | integer | No | `1` | Integer `>= 1`. |
+| `defaultAssets.ringButton.volume` | integer | No | `100` | Integer `1–100`. |
+
+### Enabling Only One Default Asset
+
+`welcome` and `ringButton` are independent. For example, to share a default ring sound while leaving animations profile-specific, set `defaultAssets.enabled: true`, `welcome.enabled: false`, and `ringButton.enabled: true`.
+
+### Preset Name Conflicts (`Default`)
+
+When `defaultAssets.enabled` is `true`, the preset name `Default` is reserved (case-insensitively). If your `presets` array already contains an entry named `Default` (or `DEFAULT`, `default`, etc.), configuration loading fails with a validation error instructing you to rename the preset or disable `defaultAssets`. When `defaultAssets.enabled` is `false` or omitted, existing presets named `Default` continue working normally.
+
+### Validation & Error Handling
+
+- Structure, types, filenames, playback ranges, and preset name conflicts are validated when `config.json` loads.
+- Actual default asset files on disk are validated only when selected for an apply operation, so a missing or unreadable **unused** default asset will not block a profile that does not need it.
+- Defaults are never used as error recovery when a profile explicitly enables a missing or invalid asset.

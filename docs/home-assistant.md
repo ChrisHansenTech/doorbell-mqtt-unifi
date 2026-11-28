@@ -26,13 +26,39 @@ All entities listed below belong to this device.
 
 This dropdown lists all presets defined in your `config.json`.
 
+When `defaultAssets.enabled` is `true` and at least one default asset (`welcome` or `ringButton`) is enabled, a virtual **`Default`** option is automatically added at the top of the dropdown (immediately after `none` if present, before all user-defined presets). This works even if no user-defined presets are configured, and is automatically removed from retained discovery if you disable `defaultAssets` (or disable both default assets) and restart the service.
+
 When you select a preset:
 
-- The profile is uploaded to the doorbell
+- The profile is uploaded to the doorbell (automatically substituting enabled default assets for any disabled or omitted profile asset)
 - The animation and/or sound is applied
 - The status sensor updates during the process
+- **Last applied profile** keeps the selected preset name when a regular preset substitutes default assets, and reports `Default` when the virtual `Default` profile is applied
 
 This is the primary way most users will interact with the service.
+
+### Restoring the `Default` Profile via Automation
+
+Because `Default` is a standard option on the existing **Presets** select entity, you can restore your everyday doorbell assets from any Home Assistant automation or script using `select.select_option`:
+
+```yaml
+alias: Restore Default Doorbell Profile After Christmas
+triggers:
+  - trigger: time
+    at: "00:00:00"
+conditions:
+  - condition: template
+    value_template: "{{ now().month == 12 and now().day == 26 }}"
+actions:
+  - action: select.select_option
+    target:
+      entity_id: select.doorbell_mqtt_unifi_preset
+    data:
+      option: "Default"
+mode: single
+```
+
+*(Replace `select.doorbell_mqtt_unifi_preset` with your instance's preset select entity ID.)*
 
 ## Custom Directory (Text)
 
@@ -153,13 +179,20 @@ The result is reported through the **Profile Validation** sensor.
 Pressing this button will:
 
 - Load the profile stored in `last_applied.json`
-- Reapply that profile to the doorbell
+- Resolve applicable default assets using the current `config.json` (for both regular profiles and the virtual `Default` profile)
+- Reapply the resulting effective profile to the doorbell and persist the updated state
+
+If the last applied profile was the virtual `Default` profile (`isDefaultProfile: true`) and `defaultAssets` has since been disabled (or neither default asset is enabled), **Reapply Last Profile** reports an error, returns **Status** to `idle`, and preserves the previous state without applying an unrelated user-defined preset.
 
 This is useful if:
 
 - The doorbell restarted
 - The configuration was overwritten
 - Another service modified the doorbell configuration
+
+> **Profile Validation note (IPC mode):** **Validate Profile** compares the doorbell's live IPC configuration against the hash persisted when the profile was last applied (including any substituted defaults or virtual `Default` profile). Editing `defaultAssets` in `config.json` does not invalidate an existing match until you reapply.
+
+> **Service Restart note:** Restarting the container restores the persisted profile name and preset selection in Home Assistant without automatically uploading or reapplying assets.
 
 ## Profile Validation (Sensor)
 

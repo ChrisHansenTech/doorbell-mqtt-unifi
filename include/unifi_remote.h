@@ -4,6 +4,7 @@
 #include "ssh.h"
 #include "unifi_ipc.h"
 #include "unifi_profile.h"
+#include "unifi_profile_resolver.h"
 #include <stdbool.h>
 
 /**
@@ -50,6 +51,8 @@ error_return_t unifi_profile_upload_and_apply(ssh_session_t *session, const char
  * @return error_return_t 
  */
 error_return_t unifi_profile_upload_and_apply_ex(ssh_session_t *session, const char *profile_dir, const unifi_profile_t *profile, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state);
+
+error_return_t unifi_profile_upload_and_apply_effective(ssh_session_t *session, const unifi_effective_profile_t *effective, unifi_apply_method_t method, unifi_ipc_raw_t *applied_state);
 
 /**
  * @brief Uploads the given SFX file to the device and plays it at the specified volume.

@@ -45,5 +45,22 @@
         "presets": [
         ],
         "defaultVolume": 100
+    },
+  "defaultAssets": {
+    "enabled": false,
+    "directory": "/profiles/default-assets",
+    "welcome": {
+      "enabled": false,
+      "file": "default-welcome.png",
+      "count": 1,
+      "durationMs": 3000,
+      "loop": false
+    },
+    "ringButton": {
+      "enabled": false,
+      "file": "default-ring.ogg",
+      "repeatTimes": 1,
+      "volume": 100
     }
+  }
 }

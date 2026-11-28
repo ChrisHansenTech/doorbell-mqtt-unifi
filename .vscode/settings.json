@@ -3,7 +3,7 @@
   "unityExplorer.testSourceFileRegex": "tests\\/test_.*\\.c",
 
   // How to detect test functions
-  "unityExplorer.testCaseRegex": "void\\s+(test_.*)\\s*\\(.*\\)",
+  "unityExplorer.testCaseRegex": "void\\s+(test_\\w+)\\s*\\(\\s*(?:void)?\\s*\\)\\s*\\{",
 
   // Build settings
   "unityExplorer.testBuildApplication": "make",

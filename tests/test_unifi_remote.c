@@ -7,6 +7,7 @@
 #include "unifi_ipc.h"
 #include "unifi_profile.h"
 #include "unifi_profile_json.h"
+#include "unifi_profile_resolver.h"
 #include "unifi_remote.h"
 #include "utils.h"
 
@@ -836,6 +837,202 @@ void test_defect3_ipc_apply_preserves_mapped_step_errors_and_skips_ipc_cli(void)
     }
 }
 
+/* ===== Issue #11: Effective profile / default asset remote operation tests ===== */
+
+static char g_captured_anim_md5[64];
+static char g_captured_lcm_ipc[1024];
+static char g_captured_snd_ipc[1024];
+
+static bool capture_effective_upload_cb(const char *local_path, const char *remote_dir, unsigned long remote_mode, size_t call_index) {
+    (void)remote_dir;
+    (void)remote_mode;
+    (void)call_index;
+    if (strstr(local_path, ".png.md5")) {
+        char *text = NULL;
+        if (utils_read_file(local_path, &text, NULL)) {
+            snprintf(g_captured_anim_md5, sizeof(g_captured_anim_md5), "%s", text);
+            free(text);
+        }
+    } else if (strstr(local_path, "lcm_ipc_msg.json")) {
+        char *text = NULL;
+        if (utils_read_file(local_path, &text, NULL)) {
+            snprintf(g_captured_lcm_ipc, sizeof(g_captured_lcm_ipc), "%s", text);
+            free(text);
+        }
+    } else if (strstr(local_path, "sounds_ipc_msg.json")) {
+        char *text = NULL;
+        if (utils_read_file(local_path, &text, NULL)) {
+            snprintf(g_captured_snd_ipc, sizeof(g_captured_snd_ipc), "%s", text);
+            free(text);
+        }
+    }
+    return true;
+}
+
+static bool write_tagged_png(const char *path, const char *tag) {
+    unsigned char buf[64];
+    static const unsigned char hdr[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    memcpy(buf, hdr, 8);
+    size_t tlen = strlen(tag);
+    if (tlen > sizeof(buf) - 8) tlen = sizeof(buf) - 8;
+    memcpy(buf + 8, tag, tlen);
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return false;
+    bool ok = fwrite(buf, 1, 8 + tlen, fp) == 8 + tlen;
+    fclose(fp);
+    return ok;
+}
+
+void test_effective_upload_mixed_sources_ipc_and_legacy(void) {
+    char pdir[256];
+    char ddir[256];
+    snprintf(pdir, sizeof(pdir), "%s/seasonal", g_tmp_dir);
+    snprintf(ddir, sizeof(ddir), "%s/default_assets", g_tmp_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(pdir, "xmas.png", "ignored.ogg", true, false));
+    TEST_ASSERT_TRUE(utils_create_directory(ddir));
+
+    char def_snd[PATH_MAX];
+    snprintf(def_snd, sizeof(def_snd), "%s/def-ring.ogg", ddir);
+    TEST_ASSERT_TRUE(test_write_minimal_ogg(def_snd));
+    /* Notice: def-welcome.png does NOT exist in ddir (unused default welcome must NOT block apply!) */
+
+    unifi_profile_t src = {0};
+    TEST_ASSERT_TRUE(unifi_profile_load_from_file(pdir, &src));
+
+    config_default_assets_t defaults = {0};
+    defaults.enabled = true;
+    snprintf(defaults.directory, sizeof(defaults.directory), "%s", ddir);
+    defaults.welcome.enabled = true;
+    snprintf(defaults.welcome.file, sizeof(defaults.welcome.file), "missing-unused-def.png");
+    defaults.welcome.count = 5;
+    defaults.welcome.duration_ms = 2000;
+    defaults.ring_button.enabled = true;
+    snprintf(defaults.ring_button.file, sizeof(defaults.ring_button.file), "def-ring.ogg");
+    defaults.ring_button.repeat_times = 3;
+    defaults.ring_button.volume = 77;
+
+    unifi_effective_profile_t eff = {0};
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, pdir, &defaults, &eff));
+
+    /* IPC mode: stages xmas.png from pdir and def-ring.ogg from ddir */
+    g_captured_lcm_ipc[0] = '\0';
+    g_captured_snd_ipc[0] = '\0';
+    g_mock_ssh.upload_cb = capture_effective_upload_cb;
+    unifi_ipc_raw_t ipc_state = {0};
+    error_return_t err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_IPC, &ipc_state);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(6, g_mock_ssh.upload_calls);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/seasonal/xmas.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/default_assets/def-ring.ogg"));
+    TEST_ASSERT_NOT_NULL(strstr(g_captured_lcm_ipc, "\"file\":\"xmas.png\""));
+    TEST_ASSERT_NOT_NULL(strstr(g_captured_snd_ipc, "\"file\":\"def-ring.ogg\""));
+    TEST_ASSERT_NOT_NULL(strstr(g_captured_snd_ipc, "\"volume\":77"));
+    TEST_ASSERT_NOT_NULL(strstr(g_captured_snd_ipc, "\"repeatTimes\":3"));
+    unifi_ipc_raw_free(&ipc_state);
+
+    /* Legacy mode also succeeds with mixed directories */
+    reset_sim_state();
+    err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_LEGACY, NULL);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(2, g_mock_ssh.download_calls);
+    TEST_ASSERT_EQUAL_UINT(6, g_mock_ssh.upload_calls);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/seasonal/xmas.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[2], "/default_assets/def-ring.ogg"));
+}
+
+void test_effective_upload_identical_filenames_different_contents_distinct_md5(void) {
+    char pdir[256];
+    char ddir[256];
+    snprintf(pdir, sizeof(pdir), "%s/prof_same", g_tmp_dir);
+    snprintf(ddir, sizeof(ddir), "%s/def_same", g_tmp_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(pdir));
+    TEST_ASSERT_TRUE(utils_create_directory(ddir));
+
+    /* Same filename "shared.png" in both dirs, different bytes */
+    char prof_png[PATH_MAX];
+    char def_png[PATH_MAX];
+    snprintf(prof_png, sizeof(prof_png), "%s/shared.png", pdir);
+    snprintf(def_png, sizeof(def_png), "%s/shared.png", ddir);
+    TEST_ASSERT_TRUE(write_tagged_png(prof_png, "PROFILE_ASSET_BYTES_V1"));
+    TEST_ASSERT_TRUE(write_tagged_png(def_png, "DEFAULT_ASSET_BYTES_V2"));
+
+    char expected_prof_md5[33];
+    char expected_def_md5[33];
+    TEST_ASSERT_TRUE(utils_md5_file_hex(prof_png, expected_prof_md5));
+    TEST_ASSERT_TRUE(utils_md5_file_hex(def_png, expected_def_md5));
+    TEST_ASSERT_TRUE(strcmp(expected_prof_md5, expected_def_md5) != 0);
+
+    config_default_assets_t defaults = {0};
+    defaults.enabled = true;
+    snprintf(defaults.directory, sizeof(defaults.directory), "%s", ddir);
+    defaults.welcome.enabled = true;
+    snprintf(defaults.welcome.file, sizeof(defaults.welcome.file), "shared.png");
+    defaults.welcome.count = 1;
+    defaults.welcome.duration_ms = 3000;
+
+    /* 1. Upload profile asset */
+    unifi_profile_t src = {0};
+    src.schema_version = 1;
+    src.welcome.enabled = true;
+    snprintf(src.welcome.file, sizeof(src.welcome.file), "shared.png");
+    src.welcome.count = 1;
+    src.welcome.duration_ms = 1000;
+
+    unifi_effective_profile_t eff = {0};
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, pdir, &defaults, &eff));
+
+    g_captured_anim_md5[0] = '\0';
+    g_mock_ssh.upload_cb = capture_effective_upload_cb;
+    error_return_t err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_IPC, NULL);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_STRING(expected_prof_md5, g_captured_anim_md5);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/prof_same/shared.png"));
+
+    /* 2. Switch to virtual Default with same filename "shared.png" -> uploads default bytes & distinct MD5 */
+    reset_sim_state();
+    TEST_ASSERT_TRUE(unifi_profile_build_default_effective(&defaults, &eff));
+    g_captured_anim_md5[0] = '\0';
+    g_mock_ssh.upload_cb = capture_effective_upload_cb;
+    err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_IPC, NULL);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_STRING(expected_def_md5, g_captured_anim_md5);
+    TEST_ASSERT_NOT_NULL(strstr(g_mock_ssh.upload_locals[0], "/def_same/shared.png"));
+}
+
+void test_effective_upload_fails_locally_on_missing_default_asset_and_recovers(void) {
+    char ddir[256];
+    snprintf(ddir, sizeof(ddir), "%s/def_missing", g_tmp_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(ddir));
+
+    config_default_assets_t defaults = {0};
+    defaults.enabled = true;
+    snprintf(defaults.directory, sizeof(defaults.directory), "%s", ddir);
+    defaults.welcome.enabled = true;
+    snprintf(defaults.welcome.file, sizeof(defaults.welcome.file), "def.png");
+    defaults.welcome.count = 1;
+    defaults.welcome.duration_ms = 3000;
+
+    unifi_effective_profile_t eff = {0};
+    TEST_ASSERT_TRUE(unifi_profile_build_default_effective(&defaults, &eff));
+
+    /* Fails locally BEFORE any remote SSH commands or SCP uploads */
+    error_return_t err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_IPC, NULL);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_NOT_FOUND, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "Default welcome animation"));
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_ssh.exec_calls);
+    TEST_ASSERT_EQUAL_UINT(0, g_mock_ssh.upload_calls);
+
+    /* Place valid asset and retry -> succeeds cleanly */
+    char def_png[PATH_MAX];
+    snprintf(def_png, sizeof(def_png), "%s/def.png", ddir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(def_png));
+
+    reset_sim_state();
+    err = unifi_profile_upload_and_apply_effective(mock_ssh_fake_session(), &eff, UNIFI_APPLY_IPC, NULL);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+    TEST_ASSERT_EQUAL_UINT(4, g_mock_ssh.upload_calls); /* anim + anim.md5 + lcm_ipc + sounds_ipc */
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -862,6 +1059,11 @@ int main(void) {
     /* Defect 3 regression tests */
     RUN_TEST(test_defect3_legacy_apply_preserves_mapped_step_errors);
     RUN_TEST(test_defect3_ipc_apply_preserves_mapped_step_errors_and_skips_ipc_cli);
+
+    /* Issue #11: Effective profile / default asset remote tests */
+    RUN_TEST(test_effective_upload_mixed_sources_ipc_and_legacy);
+    RUN_TEST(test_effective_upload_identical_filenames_different_contents_distinct_md5);
+    RUN_TEST(test_effective_upload_fails_locally_on_missing_default_asset_and_recovers);
 
     return UNITY_END();
 }

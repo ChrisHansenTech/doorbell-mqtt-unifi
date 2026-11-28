@@ -16,6 +16,8 @@ int state_load(applied_state_t *state, const char *state_dir);
  */
 int state_save(profile_state_t *profile_state, const char *profile_name, bool is_preset, unifi_apply_method_t apply_method, const char *state_dir);
 
+int state_save_ex(profile_state_t *profile_state, const char *profile_name, bool is_preset, bool is_default_profile, unifi_apply_method_t apply_method, const char *state_dir);
+
 /** @brief Compares the given active state with the last applied state to determine if they match.
  *  @param active_state The profile state currently active on the device.
  *  @param applied_state The last applied state loaded from disk.

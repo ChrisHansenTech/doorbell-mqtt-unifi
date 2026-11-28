@@ -14,6 +14,8 @@
 #include <string.h>
 #include <strings.h>
 
+#define HA_DISCOVERY_PAYLOAD_SIZE 4096
+
 static void build_entity_name(char *out, size_t out_len, const char *name, const char *instance) {
     if (strcasecmp(instance, "default") == 0) {
         snprintf(out, out_len, "%s", name);
@@ -68,6 +70,10 @@ static bool create_device(cJSON *out, const char *prefix, const char *instance, 
 }
 
 static bool build_entity_payload(char *payload, size_t payload_size, const entity_t *d, const config_t *cfg) {
+    if (!payload || payload_size == 0 || !d || !cfg) {
+        return false;
+    }
+
     cJSON *root = cJSON_CreateObject();
 
     if (!root) {
@@ -139,6 +145,7 @@ static bool build_entity_payload(char *payload, size_t payload_size, const entit
     cJSON *origin = cJSON_AddObjectToObject(root, "origin");
 
     if (!origin) {
+        cJSON_Delete(root);
         return false;
     }
 
@@ -146,15 +153,25 @@ static bool build_entity_payload(char *payload, size_t payload_size, const entit
     cJSON_AddStringToObject(origin, "sw_version", APP_VERSION);
     cJSON_AddStringToObject(origin, "url", "https://github.com/ChrisHansenTech/doorbell-mqtt-unifi");
 
+    char *tmp = cJSON_PrintBuffered(root, (int)payload_size, 0);
 
-    char *tmp = cJSON_PrintBuffered(root, payload_size, 0);
-    
     if (!tmp) {
+        LOG_ERROR("Failed to serialize Home Assistant discovery payload for entity '%s'", d->object_id);
+        cJSON_Delete(root);
         return false;
     }
 
-    strncpy(payload, tmp, payload_size - 1);
-    payload[payload_size - 1] = '\0';
+    size_t tmp_len = strlen(tmp);
+    if (tmp_len >= payload_size) {
+        LOG_ERROR("Home Assistant discovery payload for entity '%s' (%zu bytes) exceeds buffer size (%zu bytes); payload truncated",
+                  d->object_id, tmp_len, payload_size - 1);
+        payload[0] = '\0';
+        cJSON_Delete(root);
+        free(tmp);
+        return false;
+    }
+
+    memcpy(payload, tmp, tmp_len + 1);
 
     cJSON_Delete(root);
     free(tmp);
@@ -171,17 +188,22 @@ bool ha_publish_discovery(const config_t *cfg) {
         const entity_t *d = &HA_ENTITIES[i];
 
         char topic[256];
-        char payload[1024];
+        char payload[HA_DISCOVERY_PAYLOAD_SIZE];
 
-        snprintf(topic, sizeof(topic), "homeassistant/%s/%s_doorbell_mqtt_%s_%s/config",
-                 d->component, cfg->mqtt_cfg.prefix, cfg->mqtt_cfg.instance, d->object_id);
-    
+        int topic_len = snprintf(topic, sizeof(topic), "homeassistant/%s/%s_doorbell_mqtt_%s_%s/config",
+                                 d->component, cfg->mqtt_cfg.prefix, cfg->mqtt_cfg.instance, d->object_id);
+        if (topic_len < 0 || (size_t)topic_len >= sizeof(topic)) {
+            LOG_ERROR("Home Assistant discovery topic for entity '%s' exceeds buffer size (%zu bytes)",
+                      d->object_id, sizeof(topic) - 1);
+            return false;
+        }
+
         if (!build_entity_payload(payload, sizeof(payload), d, cfg)) {
             return false;
         }
 
         mqtt_publish(topic, payload, 1, 1);
-    }  
-    
+    }
+
     return true;
 }

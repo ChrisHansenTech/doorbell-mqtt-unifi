@@ -206,6 +206,7 @@ void setUp(void) {
     g_router_ctx.ssh_cfg = &g_cfg.ssh_cfg;
     g_router_ctx.preset_cfg = &g_cfg.preset_cfg;
     g_router_ctx.unifi_cfg = &g_cfg.unifi_cfg;
+    g_router_ctx.default_assets_cfg = &g_cfg.default_assets_cfg;
     g_router_ctx.sfx_ctx = &g_sfx_ctx;
     g_router_ctx.state_dir = g_state_dir;
 
@@ -358,6 +359,89 @@ void test_integration_ssh_timeout_error_propagation_and_recovery(void) {
     TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
 }
 
+void test_integration_default_assets_seasonal_switch_validate_and_reapply_lifecycle(void) {
+    /* Configure default assets directory and assets */
+    char def_dir[512];
+    snprintf(def_dir, sizeof(def_dir), "%s/default-assets", g_profiles_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(def_dir));
+
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/def-welcome.png", def_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(fpath));
+    snprintf(fpath, sizeof(fpath), "%s/def-ring.ogg", def_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_ogg(fpath));
+
+    g_cfg.default_assets_cfg.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.directory, sizeof(g_cfg.default_assets_cfg.directory), "%s", def_dir);
+    g_cfg.default_assets_cfg.welcome.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.welcome.file, sizeof(g_cfg.default_assets_cfg.welcome.file), "def-welcome.png");
+    g_cfg.default_assets_cfg.welcome.count = 1;
+    g_cfg.default_assets_cfg.welcome.duration_ms = 3000;
+    g_cfg.default_assets_cfg.ring_button.enabled = true;
+    snprintf(g_cfg.default_assets_cfg.ring_button.file, sizeof(g_cfg.default_assets_cfg.ring_button.file), "def-ring.ogg");
+    g_cfg.default_assets_cfg.ring_button.repeat_times = 1;
+    g_cfg.default_assets_cfg.ring_button.volume = 88;
+
+    /* Make Christmas image-only (ringButton disabled) so default ring sound is substituted */
+    char xmas_dir[PATH_MAX];
+    snprintf(xmas_dir, sizeof(xmas_dir), "%s/christmas", g_profiles_dir);
+    TEST_ASSERT_TRUE(test_create_valid_profile_dir(xmas_dir, "xmas.png", "xmas.ogg", true, false));
+
+    /* 1. Apply seasonal Christmas profile -> combines xmas.png + def-ring.ogg, validates as match */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/preset_set", "Christmas");
+    TEST_ASSERT_EQUAL_STRING("Christmas", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_device_lcm_json, "xmas.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_device_snd_json, "def-ring.ogg"));
+
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/validate_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
+
+    /* 2. Switch from seasonal profile to virtual Default via MQTT preset command */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/preset_set", "Default");
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/preset/selected")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_device_lcm_json, "def-welcome.png"));
+    TEST_ASSERT_NOT_NULL(strstr(g_device_snd_json, "def-ring.ogg"));
+
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/validate_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
+
+    /* 3. Update default welcome config and reapply -> updated asset applied and validates as match */
+    snprintf(fpath, sizeof(fpath), "%s/def-welcome-v2.png", def_dir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(fpath));
+    snprintf(g_cfg.default_assets_cfg.welcome.file, sizeof(g_cfg.default_assets_cfg.welcome.file), "def-welcome-v2.png");
+
+    /* Validate BEFORE reapply still matches persisted state (does not recompute from new config) */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/validate_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
+
+    /* Now reapply -> applies v2 and updates persisted state */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/reapply_last_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("Default", mock_mqtt_find_last_publish("/last_applied_profile")->payload);
+    TEST_ASSERT_NOT_NULL(strstr(g_device_lcm_json, "def-welcome-v2.png"));
+
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/validate_profile", "PRESS");
+    TEST_ASSERT_EQUAL_STRING("match", mock_mqtt_find_last_publish("/profile_validation")->payload);
+
+    /* 4. Existing SFX playback and Asset download remain completely unaffected */
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/sfx_preset_play", "Door Chime");
+    TEST_ASSERT_EQUAL_STRING("none", mock_mqtt_find_last_publish("/sfxpreset/selected")->payload);
+    TEST_ASSERT_EQUAL_STRING("idle", mock_mqtt_find_last_publish("/status")->payload);
+
+    mock_mqtt_reset();
+    dispatch_mqtt_command("cmd/download_assets", "PRESS");
+    TEST_ASSERT_NOT_NULL(mock_mqtt_find_last_publish("/last_download/time/attributes"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -366,6 +450,7 @@ int main(void) {
     RUN_TEST(test_integration_sfx_playback_over_mqtt_router);
     RUN_TEST(test_integration_legacy_migration_and_ha_connect_state_restore);
     RUN_TEST(test_integration_ssh_timeout_error_propagation_and_recovery);
+    RUN_TEST(test_integration_default_assets_seasonal_switch_validate_and_reapply_lifecycle);
 
     return UNITY_END();
 }

@@ -8,6 +8,7 @@
 #include "unifi_profile.h"
 #include "unifi_profile_conf.h"
 #include "unifi_profile_json.h"
+#include "unifi_profile_resolver.h"
 #include "unifi_sfx.h"
 #include "utils.h"
 
@@ -355,6 +356,209 @@ void test_sfx_resolve_preset(void) {
     TEST_ASSERT_EQUAL_STRING("fart.wav", found->file);
 }
 
+/* ===== Issue #11: Effective profile resolution & local asset validation ===== */
+
+static config_default_assets_t make_default_assets_cfg(const char *dir, bool global_en, bool welcome_en, bool ring_en) {
+    config_default_assets_t d = {0};
+    d.enabled = global_en;
+    snprintf(d.directory, sizeof(d.directory), "%s", dir ? dir : "/profiles/default-assets");
+    d.welcome.enabled = welcome_en;
+    snprintf(d.welcome.file, sizeof(d.welcome.file), "def-welcome.png");
+    d.welcome.count = 10;
+    d.welcome.duration_ms = 2400;
+    d.welcome.loop = true;
+    d.ring_button.enabled = ring_en;
+    snprintf(d.ring_button.file, sizeof(d.ring_button.file), "def-ring.ogg");
+    d.ring_button.repeat_times = 2;
+    d.ring_button.volume = 85;
+    return d;
+}
+
+void test_profile_resolver_matrix_and_preserves_original(void) {
+    unifi_profile_t src = {0};
+    src.schema_version = 1;
+    src.welcome.enabled = true;
+    snprintf(src.welcome.file, sizeof(src.welcome.file), "xmas.png");
+    src.welcome.count = 30;
+    src.welcome.duration_ms = 1500;
+    src.welcome.loop = false;
+    snprintf(src.welcome.gui_id, sizeof(src.welcome.gui_id), "WELCOME");
+
+    /* Disabled ring_button with stale playback fields that must NOT be inherited on default substitution */
+    src.ring_button.enabled = false;
+    snprintf(src.ring_button.file, sizeof(src.ring_button.file), "stale.ogg");
+    src.ring_button.repeat_times = 9;
+    src.ring_button.volume = 12;
+
+    unifi_profile_t snapshot = src;
+    config_default_assets_t defaults = make_default_assets_cfg("/profiles/defaults", true, true, true);
+    unifi_effective_profile_t eff = {0};
+
+    /* Image enabled in profile + sound disabled -> profile image + default sound with complete default playback */
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, "/profiles/xmas", &defaults, &eff));
+    TEST_ASSERT_EQUAL_MEMORY(&snapshot, &src, sizeof(src)); /* original untouched */
+
+    TEST_ASSERT_TRUE(eff.profile.welcome.enabled);
+    TEST_ASSERT_EQUAL_STRING("xmas.png", eff.profile.welcome.file);
+    TEST_ASSERT_EQUAL_INT(30, eff.profile.welcome.count);
+    TEST_ASSERT_EQUAL_INT(1500, eff.profile.welcome.duration_ms);
+    TEST_ASSERT_FALSE(eff.profile.welcome.loop);
+    TEST_ASSERT_EQUAL_STRING("/profiles/xmas", eff.welcome_dir);
+    TEST_ASSERT_FALSE(eff.welcome_is_default);
+
+    TEST_ASSERT_TRUE(eff.profile.ring_button.enabled);
+    TEST_ASSERT_EQUAL_STRING("def-ring.ogg", eff.profile.ring_button.file);
+    TEST_ASSERT_EQUAL_INT(2, eff.profile.ring_button.repeat_times);
+    TEST_ASSERT_EQUAL_INT(85, eff.profile.ring_button.volume);
+    TEST_ASSERT_EQUAL_STRING("RING_BUTTON_PRESSED", eff.profile.ring_button.sound_state_name);
+    TEST_ASSERT_EQUAL_STRING("/profiles/defaults", eff.ring_button_dir);
+    TEST_ASSERT_TRUE(eff.ring_button_is_default);
+
+    /* Sound only in profile -> default image + profile sound */
+    src.welcome.enabled = false;
+    src.ring_button.enabled = true;
+    snprintf(src.ring_button.file, sizeof(src.ring_button.file), "bday.wav");
+    src.ring_button.repeat_times = 1;
+    src.ring_button.volume = 70;
+
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, "/profiles/bday", &defaults, &eff));
+    TEST_ASSERT_TRUE(eff.profile.welcome.enabled);
+    TEST_ASSERT_EQUAL_STRING("def-welcome.png", eff.profile.welcome.file);
+    TEST_ASSERT_EQUAL_INT(10, eff.profile.welcome.count);
+    TEST_ASSERT_EQUAL_INT(2400, eff.profile.welcome.duration_ms);
+    TEST_ASSERT_TRUE(eff.profile.welcome.loop);
+    TEST_ASSERT_EQUAL_STRING("WELCOME", eff.profile.welcome.gui_id);
+    TEST_ASSERT_EQUAL_STRING("/profiles/defaults", eff.welcome_dir);
+    TEST_ASSERT_TRUE(eff.welcome_is_default);
+
+    TEST_ASSERT_TRUE(eff.profile.ring_button.enabled);
+    TEST_ASSERT_EQUAL_STRING("bday.wav", eff.profile.ring_button.file);
+    TEST_ASSERT_EQUAL_INT(70, eff.profile.ring_button.volume);
+    TEST_ASSERT_EQUAL_STRING("/profiles/bday", eff.ring_button_dir);
+    TEST_ASSERT_FALSE(eff.ring_button_is_default);
+
+    /* Neither asset enabled in profile + global defaults disabled -> preserves disabled state */
+    src.welcome.enabled = false;
+    src.ring_button.enabled = false;
+    defaults.enabled = false;
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, "/profiles/empty", &defaults, &eff));
+    TEST_ASSERT_FALSE(eff.profile.welcome.enabled);
+    TEST_ASSERT_FALSE(eff.profile.ring_button.enabled);
+    TEST_ASSERT_FALSE(eff.welcome_is_default);
+    TEST_ASSERT_FALSE(eff.ring_button_is_default);
+
+    /* Only default welcome enabled -> welcome falls back, ringButton stays disabled */
+    defaults = make_default_assets_cfg("/profiles/defaults", true, true, false);
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, "/profiles/empty", &defaults, &eff));
+    TEST_ASSERT_TRUE(eff.profile.welcome.enabled);
+    TEST_ASSERT_TRUE(eff.welcome_is_default);
+    TEST_ASSERT_FALSE(eff.profile.ring_button.enabled);
+    TEST_ASSERT_FALSE(eff.ring_button_is_default);
+
+    /* Invalid arguments */
+    TEST_ASSERT_FALSE(unifi_profile_resolve_effective(NULL, "/profiles/x", &defaults, &eff));
+    TEST_ASSERT_FALSE(unifi_profile_resolve_effective(&src, "/profiles/x", &defaults, NULL));
+}
+
+void test_profile_resolver_virtual_default_profile_construction(void) {
+    unifi_effective_profile_t eff = {0};
+
+    /* Unavailable when NULL, globally disabled, or neither asset enabled */
+    TEST_ASSERT_FALSE(unifi_profile_build_default_effective(NULL, &eff));
+
+    config_default_assets_t disabled = make_default_assets_cfg("/profiles/defaults", false, true, true);
+    TEST_ASSERT_FALSE(unifi_profile_build_default_effective(&disabled, &eff));
+
+    config_default_assets_t none_en = make_default_assets_cfg("/profiles/defaults", true, false, false);
+    TEST_ASSERT_FALSE(unifi_profile_build_default_effective(&none_en, &eff));
+
+    /* Both enabled */
+    config_default_assets_t both = make_default_assets_cfg("/profiles/defaults", true, true, true);
+    TEST_ASSERT_TRUE(unifi_profile_build_default_effective(&both, &eff));
+    TEST_ASSERT_TRUE(eff.profile.welcome.enabled);
+    TEST_ASSERT_TRUE(eff.welcome_is_default);
+    TEST_ASSERT_EQUAL_STRING("def-welcome.png", eff.profile.welcome.file);
+    TEST_ASSERT_EQUAL_STRING("/profiles/defaults", eff.welcome_dir);
+    TEST_ASSERT_TRUE(eff.profile.ring_button.enabled);
+    TEST_ASSERT_TRUE(eff.ring_button_is_default);
+    TEST_ASSERT_EQUAL_STRING("def-ring.ogg", eff.profile.ring_button.file);
+    TEST_ASSERT_EQUAL_STRING("/profiles/defaults", eff.ring_button_dir);
+
+    /* Welcome only */
+    config_default_assets_t w_only = make_default_assets_cfg("/profiles/defaults", true, true, false);
+    TEST_ASSERT_TRUE(unifi_profile_build_default_effective(&w_only, &eff));
+    TEST_ASSERT_TRUE(eff.profile.welcome.enabled);
+    TEST_ASSERT_FALSE(eff.profile.ring_button.enabled);
+
+    /* Ring button only */
+    config_default_assets_t r_only = make_default_assets_cfg("/profiles/defaults", true, false, true);
+    TEST_ASSERT_TRUE(unifi_profile_build_default_effective(&r_only, &eff));
+    TEST_ASSERT_FALSE(eff.profile.welcome.enabled);
+    TEST_ASSERT_TRUE(eff.profile.ring_button.enabled);
+}
+
+void test_profile_effective_asset_validation_errors_and_no_fallback_on_invalid_profile_asset(void) {
+    char pdir[256];
+    char ddir[256];
+    snprintf(pdir, sizeof(pdir), "%s/prof", g_tmp_dir);
+    snprintf(ddir, sizeof(ddir), "%s/defaults", g_tmp_dir);
+    TEST_ASSERT_TRUE(utils_create_directory(pdir));
+    TEST_ASSERT_TRUE(utils_create_directory(ddir));
+
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/prof.png", pdir);
+    TEST_ASSERT_TRUE(test_write_minimal_png(fpath));
+    snprintf(fpath, sizeof(fpath), "%s/def-ring.ogg", ddir);
+    TEST_ASSERT_TRUE(test_write_minimal_ogg(fpath));
+    /* Note: def-welcome.png intentionally does NOT exist in ddir */
+
+    config_default_assets_t defaults = make_default_assets_cfg(ddir, true, true, true);
+
+    /* 1. Unused default welcome is missing, but profile enables valid prof.png -> validation SUCCEEDS */
+    unifi_profile_t src = {0};
+    src.welcome.enabled = true;
+    snprintf(src.welcome.file, sizeof(src.welcome.file), "prof.png");
+    src.ring_button.enabled = false;
+
+    unifi_effective_profile_t eff = {0};
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, pdir, &defaults, &eff));
+    error_return_t err = unifi_effective_profile_validate_assets(&eff);
+    TEST_ASSERT_EQUAL_INT(ERROR_NONE, err.error_code);
+
+    /* 2. Profile explicitly enables missing image -> MUST NOT fall back to default, reports profile error */
+    snprintf(src.welcome.file, sizeof(src.welcome.file), "missing-prof.png");
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, pdir, &defaults, &eff));
+    TEST_ASSERT_FALSE(eff.welcome_is_default);
+    err = unifi_effective_profile_validate_assets(&eff);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_NOT_FOUND, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "missing-prof.png"));
+
+    /* 3. Selected default welcome is missing -> reports descriptive default welcome error */
+    src.welcome.enabled = false;
+    TEST_ASSERT_TRUE(unifi_profile_resolve_effective(&src, pdir, &defaults, &eff));
+    TEST_ASSERT_TRUE(eff.welcome_is_default);
+    err = unifi_effective_profile_validate_assets(&eff);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_NOT_FOUND, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "Default welcome animation"));
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "def-welcome.png"));
+
+    /* 4. Selected default welcome has corrupt PNG bytes -> reports validation error naming default welcome */
+    snprintf(fpath, sizeof(fpath), "%s/def-welcome.png", ddir);
+    TEST_ASSERT_TRUE(test_write_text(fpath, "NOT_A_PNG_HEADER"));
+    err = unifi_effective_profile_validate_assets(&eff);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_TYPE_INVALID, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "Default welcome animation"));
+
+    /* 5. Selected default ring sound missing -> reports descriptive default ring sound error */
+    TEST_ASSERT_TRUE(test_write_minimal_png(fpath));
+    snprintf(fpath, sizeof(fpath), "%s/def-ring.ogg", ddir);
+    TEST_ASSERT_EQUAL_INT(0, remove(fpath));
+    err = unifi_effective_profile_validate_assets(&eff);
+    TEST_ASSERT_EQUAL_INT(ERROR_FILE_NOT_FOUND, err.error_code);
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "Default ring button sound"));
+    TEST_ASSERT_NOT_NULL(strstr(err.message, "def-ring.ogg"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -365,6 +569,11 @@ int main(void) {
     RUN_TEST(test_profile_conf_patch_lcm_and_sounds);
     RUN_TEST(test_ipc_build_messages_and_parse_responses);
     RUN_TEST(test_sfx_resolve_preset);
+
+    /* Issue #11: Effective profile resolution & validation */
+    RUN_TEST(test_profile_resolver_matrix_and_preserves_original);
+    RUN_TEST(test_profile_resolver_virtual_default_profile_construction);
+    RUN_TEST(test_profile_effective_asset_validation_errors_and_no_fallback_on_invalid_profile_asset);
 
     return UNITY_END();
 }

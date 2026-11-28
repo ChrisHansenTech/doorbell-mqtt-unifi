@@ -32,6 +32,7 @@ typedef struct {
 typedef struct {
     char *profile_name;
     bool is_preset;
+    bool is_default_profile;
     unifi_apply_method_t apply_method;
     time_t applied_at;
     profile_state_t state;

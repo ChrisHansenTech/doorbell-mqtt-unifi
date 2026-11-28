@@ -413,6 +413,189 @@ static bool config_load_sfx(config_sfx_preset_t *sfx_cfg, const cJSON *sfx) {
     
 }
 
+static bool json_get_optional_bool_strict(const cJSON *obj, const char *key, bool default_val, bool *out, const char *label) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!item) {
+        *out = default_val;
+        return true;
+    }
+    if (!cJSON_IsBool(item)) {
+        LOG_ERROR("Configuration property '%s' must be a boolean.", label);
+        return false;
+    }
+    *out = cJSON_IsTrue(item);
+    return true;
+}
+
+static bool json_get_optional_int_strict(const cJSON *obj, const char *key, int default_val, int min_val, int max_val, int *out, const char *label) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!item) {
+        *out = default_val;
+        return true;
+    }
+    if (!cJSON_IsNumber(item)) {
+        LOG_ERROR("Configuration property '%s' must be a number.", label);
+        return false;
+    }
+    int v = item->valueint;
+    if ((double)v != item->valuedouble || v < min_val || (max_val >= min_val && v > max_val)) {
+        if (max_val >= min_val) {
+            LOG_ERROR("Configuration property '%s' must be an integer between %d and %d (got %g).", label, min_val, max_val, item->valuedouble);
+        } else {
+            LOG_ERROR("Configuration property '%s' must be an integer >= %d (got %g).", label, min_val, item->valuedouble);
+        }
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+static bool config_load_default_assets(config_default_assets_t *def_cfg, const config_preset_t *preset_cfg, const cJSON *root) {
+    if (!def_cfg) {
+        return false;
+    }
+
+    memset(def_cfg, 0, sizeof(*def_cfg));
+
+    const cJSON *da = cJSON_GetObjectItemCaseSensitive(root, "defaultAssets");
+    if (!da) {
+        return true;
+    }
+
+    if (!cJSON_IsObject(da)) {
+        LOG_ERROR("'defaultAssets' must be an object.");
+        return false;
+    }
+
+    bool enabled = false;
+    if (!json_get_optional_bool_strict(da, "enabled", false, &enabled, "defaultAssets.enabled")) {
+        return false;
+    }
+
+    def_cfg->enabled = enabled;
+    if (!enabled) {
+        LOG_DEBUG("defaultAssets feature is disabled; ignoring inactive default asset settings.");
+        return true;
+    }
+
+    /* Check for case-insensitive preset name conflict with reserved 'Default' name */
+    if (preset_cfg) {
+        for (size_t i = 0; i < preset_cfg->count; i++) {
+            const char *disp = preset_cfg->items[i].display_name;
+            const char *key = preset_cfg->items[i].key_name;
+            if ((disp && strcasecmp(disp, DEFAULT_PROFILE_NAME) == 0) ||
+                (key && strcasecmp(key, DEFAULT_PROFILE_NAME) == 0)) {
+                LOG_ERROR("Cannot enable default assets: a user-defined preset named 'Default' already exists. "
+                          "Rename the existing preset or disable the default assets feature.");
+                return false;
+            }
+        }
+    }
+
+    /* Validate optional directory string type (required below if at least one asset is enabled) */
+    const cJSON *dir_item = cJSON_GetObjectItemCaseSensitive(da, "directory");
+    if (dir_item) {
+        if (!cJSON_IsString(dir_item) || !dir_item->valuestring) {
+            LOG_ERROR("Configuration property 'defaultAssets.directory' must be a string.");
+            return false;
+        }
+        int written = snprintf(def_cfg->directory, sizeof(def_cfg->directory), "%s", dir_item->valuestring);
+        if (written < 0 || (size_t)written >= sizeof(def_cfg->directory)) {
+            LOG_ERROR("Configuration value for 'defaultAssets.directory' exceeds maximum length (%zu).",
+                      sizeof(def_cfg->directory) - 1);
+            return false;
+        }
+    }
+
+    /* Parse optional defaultAssets.welcome */
+    const cJSON *welcome = cJSON_GetObjectItemCaseSensitive(da, "welcome");
+    if (welcome) {
+        if (!cJSON_IsObject(welcome)) {
+            LOG_ERROR("'defaultAssets.welcome' must be an object.");
+            return false;
+        }
+
+        if (!json_get_optional_bool_strict(welcome, "enabled", false, &def_cfg->welcome.enabled, "defaultAssets.welcome.enabled")) {
+            return false;
+        }
+
+        if (def_cfg->welcome.enabled) {
+            const cJSON *file_item = cJSON_GetObjectItemCaseSensitive(welcome, "file");
+            if (!cJSON_IsString(file_item) || !file_item->valuestring || file_item->valuestring[0] == '\0') {
+                LOG_ERROR("'defaultAssets.welcome.file' is required when default welcome animation is enabled.");
+                return false;
+            }
+
+            error_return_t ferr = utils_is_valid_filename(file_item->valuestring, UTILS_FILE_CLASS_ANIMATION);
+            if (ferr.error_code != ERROR_NONE) {
+                LOG_ERROR("Invalid 'defaultAssets.welcome.file' '%s': %s", file_item->valuestring, ferr.message);
+                return false;
+            }
+
+            int written = snprintf(def_cfg->welcome.file, sizeof(def_cfg->welcome.file), "%s", file_item->valuestring);
+            if (written < 0 || (size_t)written >= sizeof(def_cfg->welcome.file)) {
+                LOG_ERROR("Configuration value for 'defaultAssets.welcome.file' exceeds maximum length.");
+                return false;
+            }
+
+            if (!json_get_optional_int_strict(welcome, "count", 1, 1, -1, &def_cfg->welcome.count, "defaultAssets.welcome.count") ||
+                !json_get_optional_int_strict(welcome, "durationMs", 3000, 1, -1, &def_cfg->welcome.duration_ms, "defaultAssets.welcome.durationMs") ||
+                !json_get_optional_bool_strict(welcome, "loop", false, &def_cfg->welcome.loop, "defaultAssets.welcome.loop")) {
+                return false;
+            }
+        }
+    }
+
+    /* Parse optional defaultAssets.ringButton */
+    const cJSON *ring = cJSON_GetObjectItemCaseSensitive(da, "ringButton");
+    if (ring) {
+        if (!cJSON_IsObject(ring)) {
+            LOG_ERROR("'defaultAssets.ringButton' must be an object.");
+            return false;
+        }
+
+        if (!json_get_optional_bool_strict(ring, "enabled", false, &def_cfg->ring_button.enabled, "defaultAssets.ringButton.enabled")) {
+            return false;
+        }
+
+        if (def_cfg->ring_button.enabled) {
+            const cJSON *file_item = cJSON_GetObjectItemCaseSensitive(ring, "file");
+            if (!cJSON_IsString(file_item) || !file_item->valuestring || file_item->valuestring[0] == '\0') {
+                LOG_ERROR("'defaultAssets.ringButton.file' is required when default ring button sound is enabled.");
+                return false;
+            }
+
+            error_return_t ferr = utils_is_valid_filename(file_item->valuestring, UTILS_FILE_CLASS_SOUND);
+            if (ferr.error_code != ERROR_NONE) {
+                LOG_ERROR("Invalid 'defaultAssets.ringButton.file' '%s': %s", file_item->valuestring, ferr.message);
+                return false;
+            }
+
+            int written = snprintf(def_cfg->ring_button.file, sizeof(def_cfg->ring_button.file), "%s", file_item->valuestring);
+            if (written < 0 || (size_t)written >= sizeof(def_cfg->ring_button.file)) {
+                LOG_ERROR("Configuration value for 'defaultAssets.ringButton.file' exceeds maximum length.");
+                return false;
+            }
+
+            if (!json_get_optional_int_strict(ring, "repeatTimes", 1, 1, -1, &def_cfg->ring_button.repeat_times, "defaultAssets.ringButton.repeatTimes") ||
+                !json_get_optional_int_strict(ring, "volume", 100, 1, 100, &def_cfg->ring_button.volume, "defaultAssets.ringButton.volume")) {
+                return false;
+            }
+        }
+    }
+
+    if ((def_cfg->welcome.enabled || def_cfg->ring_button.enabled) && def_cfg->directory[0] == '\0') {
+        LOG_ERROR("'defaultAssets.directory' is required when at least one default asset is enabled.");
+        return false;
+    }
+
+    LOG_INFO("Loaded defaultAssets configuration (enabled=true, dir='%s', welcome=%s, ringButton=%s).",
+             def_cfg->directory,
+             def_cfg->welcome.enabled ? "enabled" : "disabled",
+             def_cfg->ring_button.enabled ? "enabled" : "disabled");
+    return true;
+}
+
 bool config_load(const char *filename, config_t *cfg) {
     if (!filename || !cfg) {
         LOG_ERROR("config_load: invalid parameters: filename=%p cfg=%p", (void*)filename, (void*)cfg);
@@ -504,6 +687,12 @@ bool config_load(const char *filename, config_t *cfg) {
     }
 
     config_load_sfx(&cfg->sfx_preset_cfg, sfx);
+
+    if (!config_load_default_assets(&cfg->default_assets_cfg, &cfg->preset_cfg, root)) {
+        cJSON_Delete(root);
+        config_free(cfg);
+        return false;
+    }
 
     cJSON_Delete(root);
 
